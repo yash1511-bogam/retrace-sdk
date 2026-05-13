@@ -1,0 +1,61 @@
+{
+  "name": "retrace-sdk",
+  "version": "0.1.7",
+  "description": "The execution replay engine for AI agents. Record, replay, fork, and share agent executions.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "license": "MIT",
+  "author": "Yash Bogam",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yash1511-bogam/retrace-sdk-typescript",
+    "directory": "packages/sdk-typescript"
+  },
+  "homepage": "https://retrace.yashbogam.me/docs/sdk-typescript",
+  "keywords": ["ai", "agent", "tracing", "observability", "replay", "llm", "openai", "anthropic", "gemini"],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc",
+    "lint": "eslint src/",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "ws": "8.20.0"
+  },
+  "peerDependencies": {
+    "@google/genai": ">=1.52.0",
+    "openai": ">=4.0.0",
+    "@anthropic-ai/sdk": ">=0.30.0"
+  },
+  "peerDependenciesMeta": {
+    "@google/genai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@google/genai": "^1.52.0",
+    "@types/node": "22.15.3",
+    "@types/ws": "8.18.1",
+    "typescript": "6.0.3",
+    "openai": "^4.90.0",
+    "@anthropic-ai/sdk": "^0.95.0"
+  }
+}

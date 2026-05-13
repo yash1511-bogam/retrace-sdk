@@ -1,0 +1,27 @@
+const config = {
+    apiKey: process.env.RETRACE_API_KEY || "",
+    baseUrl: process.env.RETRACE_BASE_URL || "http://localhost:3001",
+    wsUrl: "",
+    projectId: process.env.RETRACE_PROJECT_ID || undefined,
+    enabled: !["false", "0"].includes((process.env.RETRACE_ENABLED || "true").toLowerCase()),
+};
+config.wsUrl = config.baseUrl.replace("https://", "wss://").replace("http://", "ws://");
+export function configure(opts) {
+    if (opts.apiKey && !opts.apiKey.startsWith("rt_live_")) {
+        throw new Error("Invalid Retrace API key. Keys must start with 'rt_live_'. Get yours at https://retrace.yashbogam.me/settings");
+    }
+    Object.assign(config, opts);
+    if (opts.baseUrl && !opts.wsUrl) {
+        config.wsUrl = config.baseUrl.replace("https://", "wss://").replace("http://", "ws://");
+    }
+    return config;
+}
+export function requireApiKey() {
+    if (!config.apiKey) {
+        throw new Error("Retrace API key required. Call configure({ apiKey: 'rt_live_...' }) or set RETRACE_API_KEY. Get yours at https://retrace.yashbogam.me/settings");
+    }
+    return config.apiKey;
+}
+export function getConfig() {
+    return config;
+}
