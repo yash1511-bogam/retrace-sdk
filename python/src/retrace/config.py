@@ -13,6 +13,7 @@ class RetraceConfig:
     ws_url: str = ""
     flush_interval: float = 2.0
     enabled: bool = True
+    sample_rate: float = 1.0
 
     def __post_init__(self):
         if not self.api_key:
@@ -26,6 +27,9 @@ class RetraceConfig:
         enabled_env = os.environ.get("RETRACE_ENABLED", "true").lower()
         if enabled_env in ("false", "0", "no"):
             self.enabled = False
+        sample_env = os.environ.get("RETRACE_SAMPLE_RATE")
+        if sample_env:
+            self.sample_rate = float(sample_env)
 
 
 _config: RetraceConfig | None = None

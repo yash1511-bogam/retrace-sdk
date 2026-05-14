@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import random
 import threading
 import time
 from typing import Any, Callable
@@ -215,6 +216,8 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            if random.random() > cfg.sample_rate:
+                return fn(*args, **kwargs)
             recorder = TraceRecorder(name=fn.__name__, input={"args": list(args), "kwargs": kwargs}, resumable=resumable)
             recorder.start_trace()
             try:
@@ -238,6 +241,8 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            if random.random() > cfg.sample_rate:
+                return fn(*args, **kwargs)
             recorder = TraceRecorder(
                 name=name or fn.__name__,
                 input=input if input is not None else {"args": list(args), "kwargs": kwargs},
@@ -268,6 +273,7 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
     class _RecordProxy:
         def __init__(self):
             self._recorder = TraceRecorder(name=name, input=input, metadata=metadata, resumable=resumable)
+            self._sampled = random.random() <= cfg.sample_rate
 
         @property
         def output(self):
@@ -281,10 +287,14 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
             return decorator(fn)
 
         def __enter__(self):
+            if not self._sampled:
+                return self
             self._recorder.start_trace()
             return self
 
         def __exit__(self, exc_type, exc_val, exc_tb):
+            if not self._sampled:
+                return False
             if exc_type:
                 self._recorder.end_trace(status=TraceStatus.FAILED)
             else:

@@ -4,6 +4,7 @@ export interface Config {
   wsUrl: string;
   projectId: string | undefined;
   enabled: boolean;
+  sampleRate: number;
 }
 
 const config: Config = {
@@ -12,6 +13,7 @@ const config: Config = {
   wsUrl: "",
   projectId: process.env.RETRACE_PROJECT_ID || undefined,
   enabled: !["false", "0"].includes((process.env.RETRACE_ENABLED || "true").toLowerCase()),
+  sampleRate: parseFloat(process.env.RETRACE_SAMPLE_RATE || "1"),
 };
 config.wsUrl = config.baseUrl.replace("https://", "wss://").replace("http://", "ws://");
 

@@ -45,7 +45,7 @@ import { configure } from "retrace-sdk";
 
 configure({
   apiKey: "rt_live_...",           // or RETRACE_API_KEY env var
-  baseUrl: "https://api.retrace.yashbogam.me",
+  baseUrl: "https://api-retrace.yashbogam.me",
   projectId: "...",                 // or RETRACE_PROJECT_ID env var
 });
 ```

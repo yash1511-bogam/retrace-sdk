@@ -103,9 +103,10 @@ export class TraceRecorder {
 
 export function record(opts?: RecordOptions): TraceRecorder {
   const cfg = getConfig();
-  if (!cfg.enabled) {
-    // Return a no-op recorder
-    return new TraceRecorder(opts);
+  if (!cfg.enabled || Math.random() > cfg.sampleRate) {
+    // Return a no-op proxy that doesn't require API key or connect
+    const noop = {} as TraceRecorder;
+    return new Proxy(noop, { get: (_t, prop) => typeof prop === "string" ? (() => noop) : undefined }) as TraceRecorder;
   }
   return new TraceRecorder(opts);
 }
@@ -113,7 +114,7 @@ export function record(opts?: RecordOptions): TraceRecorder {
 export function trace<T>(fn: (...args: unknown[]) => T, opts?: RecordOptions): (...args: unknown[]) => T {
   const cfg = getConfig();
   return (...args: unknown[]): T => {
-    if (!cfg.enabled) return fn(...args);
+    if (!cfg.enabled || Math.random() > cfg.sampleRate) return fn(...args);
 
     const recorder = new TraceRecorder({
       name: opts?.name || fn.name || "anonymous",

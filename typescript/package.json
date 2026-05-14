@@ -1,6 +1,6 @@
 {
   "name": "retrace-sdk",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "description": "The execution replay engine for AI agents. Record, replay, fork, and share agent executions.",
   "type": "module",
   "main": "dist/index.js",
@@ -16,7 +16,7 @@
   "author": "Yash Bogam",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yash1511-bogam/retrace-sdk-typescript",
+    "url": "https://github.com/yash1511-bogam/retrace-sdk",
     "directory": "packages/sdk-typescript"
   },
   "homepage": "https://retrace.yashbogam.me/docs/sdk-typescript",
