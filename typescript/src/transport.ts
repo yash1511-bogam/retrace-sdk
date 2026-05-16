@@ -12,6 +12,7 @@ export class WSTransport implements Transport {
   private closed = false;
   private backoff = 1000;
   private queue: string[] = [];
+  onError?: (type: string, message: string) => void;
 
   get isConnected() { return this.connected; }
 
@@ -33,6 +34,16 @@ export class WSTransport implements Transport {
         this.flushQueue();
       } else if (msg.type === "ping") {
         this.ws?.send(JSON.stringify({ type: "pong" }));
+      } else if (msg.type === "error") {
+        const err = msg.error as string;
+        if (err?.includes("limit reached")) this.onError?.("credits_exhausted", err);
+        else if (err?.includes("Rate limit")) this.onError?.("rate_limited", err);
+        else this.onError?.("error", err);
+      } else if (msg.type === "resume") {
+        import("./resume.js").then(({ parseResumeMessage, handleResume }) => {
+          const cmd = parseResumeMessage(msg);
+          if (cmd) handleResume(cmd);
+        });
       }
     });
 
@@ -40,7 +51,7 @@ export class WSTransport implements Transport {
       this.connected = false;
       this.ws = null;
       if (!this.closed) {
-        setTimeout(() => this.reconnect(), this.backoff);
+        setTimeout(() => this.reconnect(), this.backoff * (0.5 + Math.random() * 0.5));
         this.backoff = Math.min(this.backoff * 2, 30000);
       }
     });
@@ -65,7 +76,8 @@ export class WSTransport implements Transport {
     if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(msg);
     } else {
-      this.queue.push(msg);
+      // Cap offline buffer at 1000 messages to prevent memory leak
+      if (this.queue.length < 1000) this.queue.push(msg);
       if (!this.ws && !this.closed) this.connect();
     }
   }
@@ -100,11 +112,16 @@ export class HTTPTransport implements Transport {
     const cfg = getConfig();
     const url = `${cfg.baseUrl}/api/v1/traces`;
     const body = { ...this.traceData, spans: this.buildSpans() };
-    fetch(url, {
-      method: "POST",
-      headers: { "x-retrace-key": cfg.apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch(() => {});
+    const payload = JSON.stringify(body);
+    // Retry up to 3 times with exponential backoff
+    const attempt = (n: number, delay: number) => {
+      fetch(url, {
+        method: "POST",
+        headers: { "x-retrace-key": cfg.apiKey, "Content-Type": "application/json" },
+        body: payload,
+      }).catch(() => { if (n < 3) setTimeout(() => attempt(n + 1, delay * 2), delay); });
+    };
+    attempt(1, 1000);
     this.traceData = null;
     this.spans = [];
   }

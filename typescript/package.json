@@ -1,6 +1,6 @@
 {
   "name": "retrace-sdk",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "The execution replay engine for AI agents. Record, replay, fork, and share agent executions.",
   "type": "module",
   "main": "dist/index.js",

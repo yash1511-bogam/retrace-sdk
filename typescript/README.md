@@ -67,9 +67,57 @@ recorder.endSpan(span, { results: ["..."] });
 recorder.end("Done");
 ```
 
-## API Key
+## Resumable Execution (Cascade Replay)
 
-A Retrace API key (`rt_live_...`) is required. Get yours free at [retrace.yashbogam.me/settings](https://retrace.yashbogam.me/settings).
+Mark a function as resumable to enable full cascade replay from the dashboard:
+
+```typescript
+import { configure, trace } from "retrace-sdk";
+
+configure({ apiKey: "rt_live_..." });
+
+const myAgent = trace(async (prompt: string) => {
+  const plan = await planner(prompt);
+  const result = await executor(plan);
+  return summarize(result);
+}, { name: "my-agent", resumable: true });
+```
+
+When you fork at any span in the dashboard, the SDK re-executes the entire function with modified input — not just one LLM call.
+
+## Error Handling
+
+```typescript
+import { RetraceError, RetraceAuthError, RetraceCreditsExhaustedError, RetraceRateLimitError } from "retrace-sdk";
+```
+
+Typed errors for auth failures, credit exhaustion, and rate limiting.
+
+## Sampling
+
+```typescript
+configure({ apiKey: "rt_live_...", sampleRate: 0.1 }); // Record 10% of traces
+```
+
+## Changelog
+
+### 0.2.2
+
+- **Fixed** — OpenAI interceptor no longer creates dummy client instance to find prototype
+
+### 0.2.1
+
+- **Offline buffer** — stores up to 1000 messages when WebSocket disconnects, flushes on reconnect
+- **HTTP retry** — 3 attempts with exponential backoff on fallback transport
+- **Cascade replay** — `resumable: true` option registers function for SDK-level re-execution
+- **Resume listener** — handles server 'resume' commands for fork replay
+
+### 0.2.0
+
+- Typed errors (RetraceAuthError, RetraceCreditsExhaustedError, RetraceRateLimitError)
+- Trace sampling via `sampleRate` config
+- Auto-instrumentation for OpenAI, Anthropic, Gemini
+- WebSocket + HTTP fallback transport
 
 ## Links
 

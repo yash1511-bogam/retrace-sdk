@@ -239,6 +239,11 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
         if not cfg.enabled:
             return fn
 
+        # Register for cascade replay if resumable
+        if resumable:
+            from .resume import register_resumable
+            register_resumable(name or fn.__name__, fn)
+
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             if random.random() > cfg.sample_rate:

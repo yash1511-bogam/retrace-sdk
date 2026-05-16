@@ -19,7 +19,7 @@ class RetraceConfig:
         if not self.api_key:
             self.api_key = os.environ.get("RETRACE_API_KEY", "")
         if not self.base_url:
-            self.base_url = os.environ.get("RETRACE_BASE_URL", "http://localhost:3001")
+            self.base_url = os.environ.get("RETRACE_BASE_URL", "https://api-retrace.yashbogam.me")
         if not self.project_id:
             self.project_id = os.environ.get("RETRACE_PROJECT_ID") or None
         if not self.ws_url:

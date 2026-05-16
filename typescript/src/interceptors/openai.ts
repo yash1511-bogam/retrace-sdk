@@ -41,13 +41,13 @@ export function installOpenAIInterceptor(onSpan: (span: SpanData) => void) {
     const mod = openaiMod as any;
     const proto = mod?.OpenAI?.Chat?.Completions?.prototype || mod?.default?.Chat?.Completions?.prototype;
     if (!proto?.create) {
-      // Try alternative path
+      // Try accessing prototype chain without instantiation
       const OpenAI = mod?.OpenAI || mod?.default;
-      if (OpenAI) {
-        const instance = Object.getPrototypeOf(new OpenAI({ apiKey: "dummy" }).chat.completions);
-        if (instance?.create) {
-          originalCreate = instance.create;
-          instance.create = createPatchedCreate();
+      if (OpenAI?.prototype?.chat) {
+        const chatProto = Object.getPrototypeOf(Object.getPrototypeOf(OpenAI.prototype.chat)?.completions || {});
+        if (chatProto?.create) {
+          originalCreate = chatProto.create;
+          chatProto.create = createPatchedCreate();
           installed = true;
         }
       }

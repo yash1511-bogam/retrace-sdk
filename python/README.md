@@ -48,9 +48,51 @@ No extra setup needed. Install the provider SDK alongside `retrace-sdk` and call
 - **Share** — Publish traces as shareable "tapes" with interactive playback
 - **Retrace AI** — Built-in evaluations, memory extraction, and semantic search
 
-## API Key
+## Resumable Execution (Cascade Replay)
 
-A Retrace API key (`rt_live_...`) is required. Get yours free at [retrace.yashbogam.me/settings](https://retrace.yashbogam.me/settings).
+Mark a function as resumable to enable full cascade replay from the dashboard:
+
+```python
+@retrace.record(name="my-agent", resumable=True)
+def run_agent(prompt: str):
+    plan = call_planner(prompt)
+    result = call_executor(plan)
+    return summarize(result)
+```
+
+When you fork at any span in the dashboard, the SDK re-executes the entire function with modified input — all subsequent LLM calls diverge.
+
+## Error Handling
+
+```python
+from retrace import RetraceError, RetraceAuthError, RetraceCreditsExhaustedError, RetraceRateLimitError
+```
+
+## Sampling
+
+```python
+retrace.configure(api_key="rt_live_...", sample_rate=0.1)  # Record 10% of traces
+```
+
+## Changelog
+
+### 0.2.2
+
+- Version sync with TypeScript SDK
+
+### 0.2.1
+
+- **Offline buffer** — stores up to 1000 messages when WebSocket disconnects, flushes on reconnect
+- **Dedicated listener thread** — receives server 'resume' commands without needing active sends
+- **Cascade replay** — `resumable=True` registers function for SDK-level re-execution
+- **Fixed** — duplicate except block in transport, proper close() cleanup
+
+### 0.2.0
+
+- Typed errors (RetraceAuthError, RetraceCreditsExhaustedError, RetraceRateLimitError)
+- Trace sampling via `sample_rate` config
+- Auto-instrumentation for OpenAI, Anthropic, Gemini
+- WebSocket transport with auto-reconnect
 
 ## Links
 

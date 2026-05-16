@@ -6,3 +6,6 @@ export { SpanType, TraceStatus } from "./trace.js";
 export { installGeminiInterceptor, uninstallGeminiInterceptor } from "./interceptors/gemini.js";
 export { installOpenAIInterceptor, uninstallOpenAIInterceptor } from "./interceptors/openai.js";
 export { installAnthropicInterceptor, uninstallAnthropicInterceptor } from "./interceptors/anthropic.js";
+export { RetraceError, RetraceAuthError, RetraceCreditsExhaustedError, RetraceConnectionError, RetraceRateLimitError } from "./errors.js";
+export { registerResumable, handleResume } from "./resume.js";
+export type { ResumeCommand } from "./resume.js";

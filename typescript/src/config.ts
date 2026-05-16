@@ -9,7 +9,7 @@ export interface Config {
 
 const config: Config = {
   apiKey: process.env.RETRACE_API_KEY || "",
-  baseUrl: process.env.RETRACE_BASE_URL || "http://localhost:3001",
+  baseUrl: process.env.RETRACE_BASE_URL || "https://api-retrace.yashbogam.me",
   wsUrl: "",
   projectId: process.env.RETRACE_PROJECT_ID || undefined,
   enabled: !["false", "0"].includes((process.env.RETRACE_ENABLED || "true").toLowerCase()),

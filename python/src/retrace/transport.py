@@ -22,6 +22,9 @@ class WSTransport:
         self._lock = threading.RLock()
         self._connected = False
         self._backoff = 1.0
+        self._listener_thread = None
+        self._closed = False
+        self._offline_buffer: list[str] = []
 
     def connect(self):
         import websocket
@@ -36,6 +39,7 @@ class WSTransport:
             if resp.get("type") == "auth_ok":
                 self._connected = True
                 self._backoff = 1.0
+                self._start_listener()
             else:
                 self._ws.close()
                 self._ws = None
@@ -44,37 +48,61 @@ class WSTransport:
             self._ws = None
             self._connected = False
 
+    def _start_listener(self):
+        """Start background thread to listen for server-initiated messages (resume, ping)."""
+        if self._listener_thread and self._listener_thread.is_alive():
+            return
+
+        def _listen():
+            while self._connected and not self._closed and self._ws:
+                try:
+                    self._ws.settimeout(1.0)
+                    msg = self._ws.recv()
+                    parsed = json.loads(msg)
+                    if parsed.get("type") == "ping":
+                        with self._lock:
+                            if self._ws:
+                                self._ws.send(json.dumps({"type": "pong"}))
+                    elif parsed.get("type") == "resume":
+                        from .resume import parse_resume_message, handle_resume
+                        cmd = parse_resume_message(parsed)
+                        if cmd:
+                            handle_resume(cmd)
+                except Exception:
+                    pass  # timeout or connection closed
+
+        self._listener_thread = threading.Thread(target=_listen, daemon=True, name="retrace-ws-listener")
+        self._listener_thread.start()
+
     def _ensure_connected(self):
         if not self._connected or self._ws is None:
             self.connect()
 
     def send(self, event_type: str, data: dict[str, Any]):
+        msg = json.dumps({"type": event_type, "data": data})
         with self._lock:
             self._ensure_connected()
             if not self._ws:
+                # Offline buffer — store up to 1000 messages
+                if len(self._offline_buffer) < 1000:
+                    self._offline_buffer.append(msg)
                 return
             try:
-                self._ws.send(json.dumps({"type": event_type, "data": data}))
-                # Handle ping
-                self._ws.settimeout(0.1)
-                try:
-                    msg = self._ws.recv()
-                    parsed = json.loads(msg)
-                    if parsed.get("type") == "ping":
-                        self._ws.send(json.dumps({"type": "pong"}))
-                except Exception as e:
-                    logger.debug(f"Ping handling error: {e}")
-                self._ws.settimeout(10)
+                # Flush offline buffer first
+                while self._offline_buffer:
+                    self._ws.send(self._offline_buffer.pop(0))
+                self._ws.send(msg)
+                self._backoff = 1.0
             except Exception as e:
                 logger.debug(f"WebSocket send failed: {e}")
                 self._connected = False
                 self._ws = None
-                # Retry with backoff
-                time.sleep(min(self._backoff, 30.0))
-                self._backoff *= 2
+                if len(self._offline_buffer) < 1000:
+                    self._offline_buffer.append(msg)
 
     def close(self):
         with self._lock:
+            self._closed = True
             if self._ws:
                 try:
                     self._ws.close()

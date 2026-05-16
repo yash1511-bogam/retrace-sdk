@@ -1,6 +1,6 @@
 [project]
 name = "retrace-sdk"
-version = "0.2.0"
+version = "0.2.3"
 description = "Record, replay, fork & share AI agent executions"
 readme = "README.md"
 requires-python = ">=3.10"

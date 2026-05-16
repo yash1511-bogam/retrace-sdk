@@ -104,15 +104,27 @@ export class TraceRecorder {
 export function record(opts?: RecordOptions): TraceRecorder {
   const cfg = getConfig();
   if (!cfg.enabled || Math.random() > cfg.sampleRate) {
-    // Return a no-op proxy that doesn't require API key or connect
+    // Return a no-op that silently swallows all method calls
+    const methods = new Set(["start", "end", "startSpan", "endSpan", "addSpan"]);
     const noop = {} as TraceRecorder;
-    return new Proxy(noop, { get: (_t, prop) => typeof prop === "string" ? (() => noop) : undefined }) as TraceRecorder;
+    return new Proxy(noop, {
+      get: (_t, prop) => {
+        if (typeof prop === "string" && methods.has(prop)) return () => noop;
+        return undefined;
+      },
+    }) as TraceRecorder;
   }
   return new TraceRecorder(opts);
 }
 
-export function trace<T>(fn: (...args: unknown[]) => T, opts?: RecordOptions): (...args: unknown[]) => T {
+export function trace<T>(fn: (...args: unknown[]) => T, opts?: RecordOptions & { resumable?: boolean }): (...args: unknown[]) => T {
   const cfg = getConfig();
+  // Register for cascade replay if resumable
+  if (opts?.resumable) {
+    import("./resume.js").then(({ registerResumable }) => {
+      registerResumable(opts?.name || fn.name || "anonymous", fn as (...args: unknown[]) => unknown);
+    });
+  }
   return (...args: unknown[]): T => {
     if (!cfg.enabled || Math.random() > cfg.sampleRate) return fn(...args);
 
