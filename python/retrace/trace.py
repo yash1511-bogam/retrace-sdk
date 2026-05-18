@@ -37,6 +37,7 @@ class Span:
     cost: Optional[float] = None
     duration_ms: Optional[int] = None
     metadata: dict = field(default_factory=dict)
+    agent_id: Optional[str] = None
     started_at: Optional[datetime] = field(default_factory=utcnow)
     ended_at: Optional[datetime] = None
     error: Optional[str] = None
@@ -66,6 +67,8 @@ class Span:
             d["duration_ms"] = self.duration_ms
         if self.metadata:
             d["metadata"] = self.metadata
+        if self.agent_id:
+            d["agent_id"] = self.agent_id
         if self.ended_at:
             d["ended_at"] = self.ended_at.isoformat().replace("+00:00", "Z")
         if self.error:
@@ -84,6 +87,7 @@ class Trace:
     total_cost: float = 0.0
     total_duration_ms: int = 0
     metadata: dict = field(default_factory=dict)
+    session_id: Optional[str] = None
     started_at: Optional[datetime] = field(default_factory=utcnow)
     ended_at: Optional[datetime] = None
     spans: list = field(default_factory=list)
@@ -106,6 +110,8 @@ class Trace:
             d["output"] = self.output
         if self.metadata:
             d["metadata"] = self.metadata
+        if self.session_id:
+            d["session_id"] = self.session_id
         if self.ended_at:
             d["ended_at"] = self.ended_at.isoformat().replace("+00:00", "Z")
         if self.project_id:

@@ -76,6 +76,12 @@ retrace.configure(api_key="rt_live_...", sample_rate=0.1)  # Record 10% of trace
 
 ## Changelog
 
+### 0.3.0
+
+- **Sessions** — `session_id` parameter in `TraceRecorder` to group multi-turn conversations
+- **Multi-Agent** — `agent_id` field on `Span` for cross-agent tracing
+- **Guardrail support** — SDK respects HALT commands from server-side guardrail policies
+
 ### 0.2.2
 
 - Version sync with TypeScript SDK

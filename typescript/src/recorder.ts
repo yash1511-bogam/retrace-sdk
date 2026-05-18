@@ -9,6 +9,7 @@ export interface RecordOptions {
   name?: string;
   input?: unknown;
   metadata?: Record<string, unknown>;
+  sessionId?: string;
 }
 
 export class TraceRecorder {
@@ -24,6 +25,7 @@ export class TraceRecorder {
     const cfg = getConfig();
     if (cfg.projectId) this.builder.setProjectId(cfg.projectId);
     if (opts?.metadata) this.builder.setMetadata(opts.metadata);
+    if (opts?.sessionId) this.builder.setSessionId(opts.sessionId);
     if (opts?.name || opts?.input) {
       this.builder.start(opts.name, opts.input);
     }

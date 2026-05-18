@@ -101,6 +101,12 @@ configure({ apiKey: "rt_live_...", sampleRate: 0.1 }); // Record 10% of traces
 
 ## Changelog
 
+### 0.3.0
+
+- **Sessions** — `sessionId` option in `TraceRecorder` and `trace()` to group multi-turn conversations
+- **Multi-Agent** — `setAgentId()` on `SpanBuilder` for cross-agent tracing
+- **Guardrail support** — SDK respects HALT commands from server-side guardrail policies
+
 ### 0.2.2
 
 - **Fixed** — OpenAI interceptor no longer creates dummy client instance to find prototype
