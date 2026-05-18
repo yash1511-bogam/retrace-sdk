@@ -30,6 +30,7 @@ export interface SpanData {
   cost?: number;
   duration_ms?: number;
   metadata?: Record<string, unknown>;
+  agent_id?: string;
   started_at: string;
   ended_at?: string;
   error?: string;
@@ -45,6 +46,7 @@ export interface TraceData {
   total_cost: number;
   total_duration_ms: number;
   metadata?: Record<string, unknown>;
+  session_id?: string;
   started_at: string;
   ended_at?: string;
   spans?: SpanData[];
@@ -65,6 +67,7 @@ export class SpanBuilder {
   setParentId(id: string) { this.data.parent_id = id; return this; }
   setTraceId(id: string) { this.data.trace_id = id; return this; }
   setMetadata(m: Record<string, unknown>) { this.data.metadata = m; return this; }
+  setAgentId(id: string) { this.data.agent_id = id; return this; }
 
   start(): this {
     this._startTime = utcNow();
@@ -130,6 +133,7 @@ export class TraceBuilder {
 
   get id() { return this.data.id; }
   setProjectId(id: string) { this.data.project_id = id; }
+  setSessionId(id: string) { this.data.session_id = id; }
   setMetadata(m: Record<string, unknown>) { this.data.metadata = m; }
   toDict(): TraceData { return this.data; }
 }

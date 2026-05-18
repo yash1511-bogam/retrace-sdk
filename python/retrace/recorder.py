@@ -18,13 +18,14 @@ from .utils import gen_id, utcnow
 class TraceRecorder:
     """Manages recording of a single trace and its spans."""
 
-    def __init__(self, name: str | None = None, input: Any = None, metadata: dict | None = None, resumable: bool = False):
+    def __init__(self, name: str | None = None, input: Any = None, metadata: dict | None = None, resumable: bool = False, session_id: str | None = None):
         require_api_key()
         self._trace = Trace(
             name=name,
             input=input,
             metadata=metadata or {},
             project_id=get_config().project_id,
+            session_id=session_id,
         )
         if resumable:
             self._trace.metadata["_resumable"] = True

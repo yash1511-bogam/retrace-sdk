@@ -68,6 +68,10 @@ class WSTransport:
                         cmd = parse_resume_message(parsed)
                         if cmd:
                             handle_resume(cmd)
+                    elif parsed.get("type") == "halt":
+                        reason = (parsed.get("data") or {}).get("reason", "Guardrail triggered")
+                        logger.warning(f"[retrace] HALT received: {reason}")
+                        self.close()
                 except Exception:
                     pass  # timeout or connection closed
 
