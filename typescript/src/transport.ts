@@ -44,6 +44,11 @@ export class WSTransport implements Transport {
           const cmd = parseResumeMessage(msg);
           if (cmd) handleResume(cmd);
         });
+      } else if (msg.type === "replay") {
+        import("./replay.js").then(({ parseReplayMessage, handleReplay }) => {
+          const cmd = parseReplayMessage(msg);
+          if (cmd) handleReplay(cmd);
+        });
       } else if (msg.type === "halt") {
         const reason = (msg.data as { reason?: string })?.reason || "Guardrail triggered";
         this.onError?.("halt", reason);

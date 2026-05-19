@@ -68,6 +68,11 @@ class WSTransport:
                         cmd = parse_resume_message(parsed)
                         if cmd:
                             handle_resume(cmd)
+                    elif parsed.get("type") == "replay":
+                        from .replay import parse_replay_message, handle_replay
+                        cmd = parse_replay_message(parsed)
+                        if cmd:
+                            handle_replay(cmd)
                     elif parsed.get("type") == "halt":
                         reason = (parsed.get("data") or {}).get("reason", "Guardrail triggered")
                         logger.warning(f"[retrace] HALT received: {reason}")

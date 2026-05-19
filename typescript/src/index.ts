@@ -9,3 +9,5 @@ export { installAnthropicInterceptor, uninstallAnthropicInterceptor } from "./in
 export { RetraceError, RetraceAuthError, RetraceCreditsExhaustedError, RetraceConnectionError, RetraceRateLimitError } from "./errors.js";
 export { registerResumable, handleResume } from "./resume.js";
 export type { ResumeCommand } from "./resume.js";
+export { isReplaying, consumeCassetteEntry, handleReplay } from "./replay.js";
+export type { CassetteEntry, ReplayCommand } from "./replay.js";
