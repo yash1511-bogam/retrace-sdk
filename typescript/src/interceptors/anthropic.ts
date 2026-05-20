@@ -1,5 +1,6 @@
 import { SpanData, SpanType } from "../trace.js";
 import { genId, nowIso, truncateJson } from "../utils.js";
+import { isReplaying, consumeCassetteEntry } from "../replay.js";
 
 const PRICING: Record<string, [number, number]> = {
   "claude-opus-4.7": [5.0, 25.0],
@@ -50,6 +51,29 @@ function createPatchedCreate() {
     const spanId = genId();
     const startedAt = nowIso();
     const startMs = Date.now();
+
+    // During replay, return mocked response from cassette
+    if (isReplaying()) {
+      const entry = consumeCassetteEntry("anthropic.messages.create", "llm_call");
+      if (entry) {
+        const output = typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output || "");
+        const span: SpanData = {
+          id: spanId, trace_id: "", parent_id: null,
+          span_type: SpanType.LLM_CALL, name: "anthropic.messages.create", model,
+          input: truncateJson({ messages: messages.slice(0, 10) }),
+          output: truncateJson(output),
+          duration_ms: 0, started_at: startedAt, ended_at: nowIso(),
+          metadata: { replayed: true },
+        };
+        onSpanCallback?.(span);
+        return {
+          id: `msg-replay-${spanId}`, type: "message", role: "assistant", model,
+          content: [{ type: "text", text: output }],
+          usage: { input_tokens: 0, output_tokens: 0 },
+          stop_reason: "end_turn",
+        };
+      }
+    }
 
     try {
       const result = await originalCreate!.apply(this, args);

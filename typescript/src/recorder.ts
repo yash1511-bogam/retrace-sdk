@@ -5,6 +5,13 @@ import { installGeminiInterceptor } from "./interceptors/gemini.js";
 import { installOpenAIInterceptor } from "./interceptors/openai.js";
 import { installAnthropicInterceptor } from "./interceptors/anthropic.js";
 
+// Shared transport — stays open across multiple traces for resume/replay listening
+let sharedTransport: Transport | null = null;
+function getSharedTransport(): Transport {
+  if (!sharedTransport) sharedTransport = createTransport();
+  return sharedTransport;
+}
+
 export interface RecordOptions {
   name?: string;
   input?: unknown;
@@ -21,7 +28,7 @@ export class TraceRecorder {
   constructor(opts?: RecordOptions) {
     requireApiKey();
     this.builder = new TraceBuilder();
-    this.transport = createTransport();
+    this.transport = getSharedTransport();
     const cfg = getConfig();
     if (cfg.projectId) this.builder.setProjectId(cfg.projectId);
     if (opts?.metadata) this.builder.setMetadata(opts.metadata);
@@ -51,7 +58,7 @@ export class TraceRecorder {
       total_tokens: data.total_tokens,
       total_cost: data.total_cost,
     });
-    this.transport.close();
+    // Shared transport stays open for resume/replay listening
   }
 
   addSpan(span: SpanData) {

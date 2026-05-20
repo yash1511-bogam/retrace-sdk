@@ -45,6 +45,15 @@ export function installGeminiInterceptor(onSpan: (span: SpanData) => void) {
       const startedAt = nowIso();
       const startMs = Date.now();
 
+      // Replay mode — return mocked response from cassette
+      const { isReplaying, consumeCassetteEntry } = await import("../replay.js");
+      if (isReplaying()) {
+        const entry = consumeCassetteEntry("retrace.ai.generate", "llm_call");
+        if (entry) {
+          return { text: (entry.output as string) || "", usageMetadata: { promptTokenCount: 0, candidatesTokenCount: 0 }, candidates: [] };
+        }
+      }
+
       try {
         const result = await originalGenerateContent!.apply(this, args);
         const durationMs = Date.now() - startMs;
@@ -52,11 +61,12 @@ export function installGeminiInterceptor(onSpan: (span: SpanData) => void) {
         const res = result as any;
         const inputTokens = res?.usageMetadata?.promptTokenCount || 0;
         const outputTokens = res?.usageMetadata?.candidatesTokenCount || 0;
+        const outputText = res?.text ?? (res?.candidates?.[0]?.content?.parts?.filter((p: { functionCall?: unknown }) => p.functionCall).map((p: { functionCall: { name: string } }) => p.functionCall.name).join(", ") ? `[function_call: ${res.candidates[0].content.parts.filter((p: { functionCall?: unknown }) => p.functionCall).map((p: { functionCall: { name: string } }) => p.functionCall.name).join(", ")}]` : "");
 
         const span: SpanData = {
           id: spanId, trace_id: "", parent_id: null,
           span_type: SpanType.LLM_CALL, name: "retrace.ai.generate", model,
-          input: truncateJson(contents), output: truncateJson(res?.text || ""),
+          input: truncateJson(contents), output: truncateJson(outputText),
           input_tokens: inputTokens, output_tokens: outputTokens,
           cost: calcCost(model, inputTokens, outputTokens),
           duration_ms: durationMs, started_at: startedAt, ended_at: nowIso(),

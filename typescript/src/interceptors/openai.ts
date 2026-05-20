@@ -1,5 +1,6 @@
 import { SpanData, SpanType } from "../trace.js";
 import { genId, nowIso, truncateJson } from "../utils.js";
+import { isReplaying, consumeCassetteEntry } from "../replay.js";
 
 const PRICING: Record<string, [number, number]> = {
   "gpt-5.5-pro": [30.0, 180.0],
@@ -68,6 +69,30 @@ function createPatchedCreate() {
     const spanId = genId();
     const startedAt = nowIso();
     const startMs = Date.now();
+
+    // During replay, return mocked response from cassette instead of calling the real API
+    if (isReplaying()) {
+      const entry = consumeCassetteEntry("openai.chat.completions.create", "llm_call");
+      if (entry) {
+        const output = typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output || "");
+        const span: SpanData = {
+          id: spanId, trace_id: "", parent_id: null,
+          span_type: SpanType.LLM_CALL, name: "openai.chat.completions.create", model,
+          input: truncateJson({ messages: messages.slice(0, 10) }),
+          output: truncateJson(output),
+          duration_ms: 0, started_at: startedAt, ended_at: nowIso(),
+          metadata: { replayed: true },
+        };
+        onSpanCallback?.(span);
+        return {
+          id: `chatcmpl-replay-${spanId}`,
+          object: "chat.completion",
+          model,
+          choices: [{ index: 0, message: { role: "assistant", content: output }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        };
+      }
+    }
 
     try {
       const result = await originalCreate!.apply(this, args);
