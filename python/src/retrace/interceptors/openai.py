@@ -41,6 +41,45 @@ def _calc_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return 0.0
 
 
+def _wrap_stream(stream, span_id, model, messages, start):
+    """Wrap a streaming response to collect chunks and emit a span on completion."""
+    chunks = []
+    input_tokens = 0
+    output_tokens = 0
+
+    def _gen():
+        nonlocal input_tokens, output_tokens
+        try:
+            for chunk in stream:
+                delta = getattr(getattr(getattr(chunk, "choices", [None])[0], "delta", None), "content", None) if hasattr(chunk, "choices") and chunk.choices else None
+                if delta:
+                    chunks.append(delta)
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                    output_tokens = getattr(usage, "completion_tokens", 0) or 0
+                yield chunk
+        finally:
+            duration_ms = int((time.time() - start) * 1000)
+            output = "".join(chunks)
+            if _on_span:
+                _on_span({
+                    "id": span_id,
+                    "span_type": "llm_call",
+                    "name": "openai.chat.completions.create",
+                    "model": model,
+                    "input": {"messages": [{"role": m.get("role", ""), "content": str(m.get("content", ""))[:1000]} for m in messages[:10]]},
+                    "output": output[:2000],
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cost": _calc_cost(model, input_tokens, output_tokens),
+                    "duration_ms": duration_ms,
+                    "metadata": {"streaming": True},
+                })
+
+    return _gen()
+
+
 def install_openai_interceptor(on_span=None):
     global _original_create, _installed, _on_span
     if _installed:
@@ -61,11 +100,24 @@ def install_openai_interceptor(on_span=None):
 
         model = kwargs.get("model", "unknown")
         messages = kwargs.get("messages", [])
+        is_streaming = kwargs.get("stream", False)
+        response_format = kwargs.get("response_format", None)
         span_id = str(uuid.uuid4())
+
+        # Detect vision (image_url content parts) and structured output
+        has_vision = any(
+            isinstance(m.get("content"), list) and any(p.get("type") == "image_url" for p in m["content"])
+            for m in messages if isinstance(m, dict)
+        )
+        span_metadata = {}
+        if has_vision:
+            span_metadata["vision"] = True
+        if response_format:
+            span_metadata["structured_output"] = getattr(response_format, "type", str(response_format)) if not isinstance(response_format, dict) else response_format.get("type", "json_schema")
 
         # Replay mode — return mocked response from cassette
         if is_replaying():
-            entry = consume_cassette_entry()
+            entry = consume_cassette_entry("openai.chat.completions.create", "llm_call")
             if entry:
                 from unittest.mock import MagicMock
                 mock = MagicMock()
@@ -80,6 +132,11 @@ def install_openai_interceptor(on_span=None):
 
         try:
             result = _original_create(self, *args, **kwargs)
+
+            # Streaming response: wrap the iterator to collect chunks
+            if is_streaming and hasattr(result, "__iter__"):
+                return _wrap_stream(result, span_id, model, messages, start)
+
             duration_ms = int((time.time() - start) * 1000)
             usage = getattr(result, "usage", None)
             input_tokens = getattr(usage, "prompt_tokens", 0) or 0

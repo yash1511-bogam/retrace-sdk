@@ -41,6 +41,8 @@ class Span:
     started_at: Optional[datetime] = field(default_factory=utcnow)
     ended_at: Optional[datetime] = None
     error: Optional[str] = None
+    token_ids: Optional[list] = None
+    logprobs: Optional[list] = None
 
     def to_dict(self) -> dict:
         d: dict[str, Any] = {
@@ -73,6 +75,10 @@ class Span:
             d["ended_at"] = self.ended_at.isoformat().replace("+00:00", "Z")
         if self.error:
             d["error"] = self.error
+        if self.token_ids:
+            d["token_ids"] = self.token_ids
+        if self.logprobs:
+            d["logprobs"] = self.logprobs
         return d
 
 

@@ -4,7 +4,7 @@ import { configure, getConfig } from "./config.js";
 describe("SDK config", () => {
   it("has defaults", () => {
     const c = getConfig();
-    expect(c.baseUrl).toBe("http://localhost:3001");
+    expect(c.baseUrl).toBe("https://api-retrace.yashbogam.me");
     expect(c.enabled).toBe(true);
   });
   it("configures custom values", () => {

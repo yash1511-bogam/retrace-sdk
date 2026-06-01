@@ -32,7 +32,9 @@ def _extract_output_text(result) -> str:
     """Safely extract text from a Gemini response, handling function-call-only responses."""
     text = getattr(result, "text", None)
     if text is not None:
-        return text[:2000]
+        from .config import get_config
+        limit = get_config().max_payload_size
+        return text[:limit]
     # Function-call response — serialize the function call names
     candidates = getattr(result, "candidates", None)
     if candidates:
@@ -67,7 +69,7 @@ def install_gemini_interceptor(on_span=None):
 
         # Replay mode — return mocked response from cassette
         if is_replaying():
-            entry = consume_cassette_entry()
+            entry = consume_cassette_entry("gemini.generate_content", "llm_call")
             if entry:
                 from unittest.mock import MagicMock
                 mock = MagicMock()
@@ -81,6 +83,33 @@ def install_gemini_interceptor(on_span=None):
 
         try:
             result = _original_generate(self, *args, **kwargs)
+
+            # Check if streaming response (has __iter__ but not a string)
+            config_arg = kwargs.get("config") or (args[2] if len(args) > 2 else None)
+            is_stream = getattr(config_arg, "stream", False) if config_arg else False
+
+            if is_stream and hasattr(result, "__iter__") and not isinstance(result, (str, bytes)):
+                # Wrap streaming response to capture after all chunks consumed
+                def _stream_wrapper(stream, span_id, model, contents, start):
+                    chunks = []
+                    for chunk in stream:
+                        chunks.append(chunk)
+                        yield chunk
+                    # After stream exhausted, report span
+                    duration_ms = int((time.time() - start) * 1000)
+                    full_text = "".join(getattr(c, "text", "") or "" for c in chunks)
+                    if _on_span:
+                        _on_span({
+                            "id": span_id,
+                            "span_type": "llm_call",
+                            "name": "retrace.ai.generate",
+                            "model": model,
+                            "input": str(contents)[:2000] if contents else None,
+                            "output": full_text[:2000],
+                            "duration_ms": duration_ms,
+                        })
+                return _stream_wrapper(result, span_id, model, contents, start)
+
             duration_ms = int((time.time() - start) * 1000)
             input_tokens = getattr(getattr(result, "usage_metadata", None), "prompt_token_count", 0) or 0
             output_tokens = getattr(getattr(result, "usage_metadata", None), "candidates_token_count", 0) or 0

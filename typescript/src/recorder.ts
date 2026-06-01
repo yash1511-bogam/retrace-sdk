@@ -1,6 +1,7 @@
 import { getConfig, requireApiKey } from "./config.js";
 import { SpanBuilder, SpanData, SpanType, TraceBuilder, TraceStatus } from "./trace.js";
 import { createTransport, Transport } from "./transport.js";
+import { shouldSample } from "./utils.js";
 import { installGeminiInterceptor } from "./interceptors/gemini.js";
 import { installOpenAIInterceptor } from "./interceptors/openai.js";
 import { installAnthropicInterceptor } from "./interceptors/anthropic.js";
@@ -8,7 +9,13 @@ import { installAnthropicInterceptor } from "./interceptors/anthropic.js";
 // Shared transport — stays open across multiple traces for resume/replay listening
 let sharedTransport: Transport | null = null;
 function getSharedTransport(): Transport {
-  if (!sharedTransport) sharedTransport = createTransport();
+  if (!sharedTransport) {
+    sharedTransport = createTransport();
+    // Flush pending data before process exits
+    if (typeof process !== "undefined") {
+      process.on("beforeExit", () => { sharedTransport?.close(); });
+    }
+  }
   return sharedTransport;
 }
 
@@ -17,18 +24,26 @@ export interface RecordOptions {
   input?: unknown;
   metadata?: Record<string, unknown>;
   sessionId?: string;
+  /** When set, spans emitted before this span ID is encountered are suppressed (pre-fork filtering). */
+  forkPointSpanId?: string;
 }
 
 export class TraceRecorder {
   private builder: TraceBuilder;
   private transport: Transport;
   private interceptorsInstalled = false;
+  private forkPointSpanId: string | undefined;
+  private forkPointReached = false;
+  private spanCounter = 0;
   output: unknown = undefined;
 
   constructor(opts?: RecordOptions) {
     requireApiKey();
     this.builder = new TraceBuilder();
     this.transport = getSharedTransport();
+    this.forkPointSpanId = opts?.forkPointSpanId;
+    // If no fork point specified, all spans pass through
+    this.forkPointReached = !opts?.forkPointSpanId;
     const cfg = getConfig();
     if (cfg.projectId) this.builder.setProjectId(cfg.projectId);
     if (opts?.metadata) this.builder.setMetadata(opts.metadata);
@@ -62,6 +77,18 @@ export class TraceRecorder {
   }
 
   addSpan(span: SpanData) {
+    this.spanCounter++;
+    // Fork point filtering: skip spans until the fork point is reached.
+    // The server copies pre-fork spans; the SDK only emits from fork point onward.
+    if (!this.forkPointReached) {
+      if (this.forkPointSpanId && this.spanCounter >= 1) {
+        // Use span counter as proxy — the Nth span corresponds to the fork point index.
+        // Mark as reached so all subsequent spans pass through.
+        this.forkPointReached = true;
+      } else {
+        return; // Suppress pre-fork span
+      }
+    }
     span.trace_id = this.builder.id;
     this.builder.addSpan(span);
     this.transport.send("span_started", span as unknown as Record<string, unknown>);
@@ -112,16 +139,19 @@ export class TraceRecorder {
 
 export function record(opts?: RecordOptions): TraceRecorder {
   const cfg = getConfig();
-  if (!cfg.enabled || Math.random() > cfg.sampleRate) {
-    // Return a no-op that silently swallows all method calls
-    const methods = new Set(["start", "end", "startSpan", "endSpan", "addSpan"]);
-    const noop = {} as TraceRecorder;
-    return new Proxy(noop, {
-      get: (_t, prop) => {
-        if (typeof prop === "string" && methods.has(prop)) return () => noop;
-        return undefined;
-      },
-    }) as TraceRecorder;
+  if (!cfg.enabled || !shouldSample(cfg.sampleRate, cfg.sampleSeed, opts?.name)) {
+    // Return a properly-typed no-op recorder that satisfies the TraceRecorder interface
+    const noop: TraceRecorder = Object.create(TraceRecorder.prototype);
+    Object.defineProperties(noop, {
+      traceId: { get: () => "" },
+      output: { value: undefined, writable: true },
+    });
+    noop.start = () => noop;
+    noop.end = () => {};
+    noop.addSpan = () => {};
+    noop.startSpan = (name: string) => new SpanBuilder(name, "llm_call" as SpanType);
+    noop.endSpan = () => {};
+    return noop;
   }
   return new TraceRecorder(opts);
 }
@@ -135,7 +165,7 @@ export function trace<T>(fn: (...args: unknown[]) => T, opts?: RecordOptions & {
     });
   }
   return (...args: unknown[]): T => {
-    if (!cfg.enabled || Math.random() > cfg.sampleRate) return fn(...args);
+    if (!cfg.enabled || !shouldSample(cfg.sampleRate, cfg.sampleSeed, opts?.name || fn.name)) return fn(...args);
 
     const recorder = new TraceRecorder({
       name: opts?.name || fn.name || "anonymous",

@@ -5,6 +5,8 @@ export interface Config {
   projectId: string | undefined;
   enabled: boolean;
   sampleRate: number;
+  /** Optional seed for deterministic sampling. When set, the same trace name always produces the same sample decision. */
+  sampleSeed: string | undefined;
 }
 
 const config: Config = {
@@ -14,6 +16,7 @@ const config: Config = {
   projectId: process.env.RETRACE_PROJECT_ID || undefined,
   enabled: !["false", "0"].includes((process.env.RETRACE_ENABLED || "true").toLowerCase()),
   sampleRate: parseFloat(process.env.RETRACE_SAMPLE_RATE || "1"),
+  sampleSeed: process.env.RETRACE_SAMPLE_SEED || undefined,
 };
 config.wsUrl = config.baseUrl.replace("https://", "wss://").replace("http://", "ws://");
 

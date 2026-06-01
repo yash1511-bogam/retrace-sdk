@@ -34,6 +34,8 @@ export interface SpanData {
   started_at: string;
   ended_at?: string;
   error?: string;
+  token_ids?: number[];
+  logprobs?: number[];
 }
 
 export interface TraceData {

@@ -86,6 +86,11 @@ retrace.configure(api_key="rt_live_...", sample_rate=0.1)  # Record 10% of trace
 
 - Version sync with TypeScript SDK
 
+### 0.6.0
+
+- **Token ID capture** — Span dataclass now supports `token_ids` and `logprobs` fields for speculative decoding during replay
+- **Serialization** — `to_dict()` includes token_ids/logprobs when present
+
 ### 0.2.1
 
 - **Offline buffer** — stores up to 1000 messages when WebSocket disconnects, flushes on reconnect

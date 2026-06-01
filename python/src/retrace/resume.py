@@ -45,6 +45,7 @@ class ResumeCommand:
     modified_input: Any
     original_args: Any = None
     original_kwargs: Any = None
+    cassette_data: list | None = None  # Pre-recorded spans for deterministic replay
 
 
 def handle_resume(command: ResumeCommand) -> bool:
@@ -63,6 +64,7 @@ def handle_resume(command: ResumeCommand) -> bool:
             from .recorder import TraceRecorder
             from .trace import TraceStatus
             from .transport import HTTPTransport
+            from .cassette import Cassette, set_active_cassette
 
             # Use HTTP transport for fork replays — ensures trace_ended is delivered
             # before the thread exits (WS is async and may not flush in time)
@@ -75,10 +77,17 @@ def handle_resume(command: ResumeCommand) -> bool:
                     "_fork_point": command.fork_point_span_id,
                     "_cascade_replay": True,
                 },
+                fork_point_span_id=command.fork_point_span_id,
             )
             recorder._transport = HTTPTransport()
             recorder.start_trace()
             recorder._install_interceptors()
+
+            # Enable deterministic replay if cassette data is provided
+            if command.cassette_data:
+                cassette = Cassette.from_spans(command.cassette_data)
+                set_active_cassette(cassette)
+                logger.info(f"[retrace] Deterministic replay enabled ({len(cassette.entries)} entries)")
 
             # Re-execute with modified input
             args = command.original_args or []
@@ -92,9 +101,11 @@ def handle_resume(command: ResumeCommand) -> bool:
 
             result = fn(*args, **kwargs)
             recorder.end_trace(output=result, status=TraceStatus.COMPLETED)
+            set_active_cassette(None)  # Clear cassette after replay
             logger.info(f"[retrace] Cascade replay completed for fork {command.fork_id}")
         except Exception as e:
             logger.error(f"[retrace] Cascade replay failed: {e}")
+            set_active_cassette(None)
             try:
                 recorder.end_trace(status=TraceStatus.FAILED)
             except:
@@ -118,4 +129,5 @@ def parse_resume_message(msg: dict) -> Optional[ResumeCommand]:
         modified_input=data.get("modifiedInput"),
         original_args=data.get("originalArgs"),
         original_kwargs=data.get("originalKwargs"),
+        cassette_data=data.get("cassette"),
     )

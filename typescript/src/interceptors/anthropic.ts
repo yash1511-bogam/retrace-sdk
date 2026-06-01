@@ -34,7 +34,8 @@ export function installAnthropicInterceptor(onSpan: (span: SpanData) => void) {
     const mod = anthropicMod as any;
     const Anthropic = mod?.Anthropic || mod?.default;
     if (!Anthropic) return;
-    const proto = Anthropic.Messages?.prototype || Object.getPrototypeOf(new Anthropic({ apiKey: "dummy" }).messages);
+    // Find Messages prototype without instantiating a client
+    const proto = Anthropic.Messages?.prototype || Anthropic.prototype?.messages?.constructor?.prototype;
     if (!proto?.create) return;
     originalCreate = proto.create;
     proto.create = createPatchedCreate();
@@ -48,6 +49,7 @@ function createPatchedCreate() {
     const opts = (args[0] as Record<string, any>) || {};
     const model = (opts.model as string) || "unknown";
     const messages = opts.messages || [];
+    const isStreaming = !!opts.stream;
     const spanId = genId();
     const startedAt = nowIso();
     const startMs = Date.now();
@@ -77,6 +79,60 @@ function createPatchedCreate() {
 
     try {
       const result = await originalCreate!.apply(this, args);
+
+      // Streaming: Anthropic returns an async iterable of MessageStreamEvent
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (isStreaming && result && typeof (result as any)[Symbol.asyncIterator] === "function") {
+        const chunks: string[] = [];
+        let inputTokens = 0;
+        let outputTokens = 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const originalIterator = (result as any)[Symbol.asyncIterator]();
+
+        const wrappedStream = {
+          [Symbol.asyncIterator]() {
+            return {
+              async next() {
+                const { value, done } = await originalIterator.next();
+                if (done) {
+                  const durationMs = Date.now() - startMs;
+                  const output = chunks.join("");
+                  const span: SpanData = {
+                    id: spanId, trace_id: "", parent_id: null,
+                    span_type: SpanType.LLM_CALL, name: "anthropic.messages.create", model,
+                    input: truncateJson({ messages: messages.slice(0, 10) }),
+                    output: truncateJson(output),
+                    input_tokens: inputTokens, output_tokens: outputTokens,
+                    cost: calcCost(model, inputTokens, outputTokens),
+                    duration_ms: durationMs, started_at: startedAt, ended_at: nowIso(),
+                    metadata: { streaming: true },
+                  };
+                  onSpanCallback?.(span);
+                  return { value: undefined, done: true };
+                }
+                // Collect content_block_delta text
+                if (value?.type === "content_block_delta" && value?.delta?.text) {
+                  chunks.push(value.delta.text);
+                }
+                // Collect usage from message_delta
+                if (value?.type === "message_delta" && value?.usage) {
+                  outputTokens = value.usage.output_tokens || outputTokens;
+                }
+                // Collect input tokens from message_start
+                if (value?.type === "message_start" && value?.message?.usage) {
+                  inputTokens = value.message.usage.input_tokens || 0;
+                }
+                return { value, done: false };
+              },
+              return() { return originalIterator.return?.() ?? Promise.resolve({ value: undefined, done: true }); },
+              throw(e: unknown) { return originalIterator.throw?.(e) ?? Promise.reject(e); },
+            };
+          },
+        };
+        return wrappedStream;
+      }
+
+      // Non-streaming response
       const durationMs = Date.now() - startMs;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = result as any;

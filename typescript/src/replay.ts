@@ -11,6 +11,7 @@
  */
 
 import { getResumable } from "./resume.js";
+import { AsyncLocalStorage } from "async_hooks";
 
 export interface CassetteEntry {
   index: number;
@@ -29,38 +30,44 @@ export interface ReplayCommand {
   cassette: CassetteEntry[];
 }
 
-// Global cassette state for the current replay session
-let activeCassette: CassetteEntry[] | null = null;
-let cassettePointer = 0;
+/** Per-async-context cassette state. Isolates concurrent replays. */
+interface CassetteContext {
+  cassette: CassetteEntry[];
+  pointer: number;
+}
+
+const cassetteStorage = new AsyncLocalStorage<CassetteContext>();
 
 /**
- * Check if a replay is currently active.
+ * Check if a replay is currently active in this async context.
  */
 export function isReplaying(): boolean {
-  return activeCassette !== null;
+  return cassetteStorage.getStore() !== undefined;
 }
 
 /**
  * Get the next cassette entry matching a span name and type.
  * Uses sequential matching with name-based fallback for deterministic replay.
+ * Thread-safe: each async context has its own pointer.
  */
 export function consumeCassetteEntry(name: string, spanType: string): CassetteEntry | null {
-  if (!activeCassette) return null;
+  const ctx = cassetteStorage.getStore();
+  if (!ctx) return null;
 
   // Primary: sequential pointer (deterministic order)
-  if (cassettePointer < activeCassette.length) {
-    const entry = activeCassette[cassettePointer];
+  if (ctx.pointer < ctx.cassette.length) {
+    const entry = ctx.cassette[ctx.pointer];
     if (entry.name === name && entry.span_type === spanType) {
-      cassettePointer++;
+      ctx.pointer++;
       return entry;
     }
   }
 
   // Fallback: search by name + type from current pointer forward
-  for (let i = cassettePointer; i < activeCassette.length; i++) {
-    if (activeCassette[i].name === name && activeCassette[i].span_type === spanType) {
-      cassettePointer = i + 1;
-      return activeCassette[i];
+  for (let i = ctx.pointer; i < ctx.cassette.length; i++) {
+    if (ctx.cassette[i].name === name && ctx.cassette[i].span_type === spanType) {
+      ctx.pointer = i + 1;
+      return ctx.cassette[i];
     }
   }
 
@@ -69,16 +76,14 @@ export function consumeCassetteEntry(name: string, spanType: string): CassetteEn
 
 /**
  * Handle a replay command from the server.
+ * Returns a Promise that resolves when replay completes or rejects on failure.
+ * Uses AsyncLocalStorage for per-context cassette isolation.
  */
-export function handleReplay(command: ReplayCommand): boolean {
+export async function handleReplay(command: ReplayCommand): Promise<boolean> {
   const fn = getResumable(command.traceName);
   if (!fn) return false;
 
-  // Set up cassette
-  activeCassette = command.cassette;
-  cassettePointer = 0;
-
-  (async () => {
+  return cassetteStorage.run({ cassette: command.cassette, pointer: 0 }, async () => {
     try {
       const { TraceRecorder } = await import("./recorder.js");
       const { TraceStatus } = await import("./trace.js");
@@ -100,16 +105,12 @@ export function handleReplay(command: ReplayCommand): boolean {
 
       const result = await Promise.resolve(fn(...args));
       recorder.end(result, TraceStatus.COMPLETED);
+      return true;
     } catch (err) {
       console.error("[retrace] Deterministic replay failed:", err);
-    } finally {
-      // Clean up cassette state
-      activeCassette = null;
-      cassettePointer = 0;
+      return false;
     }
-  })();
-
-  return true;
+  });
 }
 
 export function parseReplayMessage(msg: { type: string; data?: unknown }): ReplayCommand | null {

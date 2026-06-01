@@ -1,6 +1,6 @@
 [project]
 name = "retrace-sdk"
-version = "0.3.8"
+version = "0.6.0"
 description = "Record, replay, fork & share AI agent executions"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -55,3 +55,4 @@ select = ["E", "F", "I", "N", "W"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/retrace"]
+# v0.5.0

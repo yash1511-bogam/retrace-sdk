@@ -111,6 +111,12 @@ configure({ apiKey: "rt_live_...", sampleRate: 0.1 }); // Record 10% of traces
 
 - **Fixed** — OpenAI interceptor no longer creates dummy client instance to find prototype
 
+### 0.6.0
+
+- **Token ID capture** — Stores output token IDs + logprobs from OpenAI responses (enables speculative decoding during replay)
+- **SpanData extended** — New `token_ids` and `logprobs` fields on SpanData interface
+- **Shared schema** — SpanInputSchema updated with `token_ids` and `logprobs` optional arrays
+
 ### 0.2.1
 
 - **Offline buffer** — stores up to 1000 messages when WebSocket disconnects, flushes on reconnect

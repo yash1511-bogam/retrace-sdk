@@ -14,6 +14,8 @@ class RetraceConfig:
     flush_interval: float = 2.0
     enabled: bool = True
     sample_rate: float = 1.0
+    sample_seed: str | None = None
+    max_payload_size: int = 2000
 
     def __post_init__(self):
         if not self.api_key:
@@ -30,6 +32,9 @@ class RetraceConfig:
         sample_env = os.environ.get("RETRACE_SAMPLE_RATE")
         if sample_env:
             self.sample_rate = float(sample_env)
+        seed_env = os.environ.get("RETRACE_SAMPLE_SEED")
+        if seed_env:
+            self.sample_seed = seed_env
 
 
 _config: RetraceConfig | None = None

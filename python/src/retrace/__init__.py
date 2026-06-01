@@ -7,7 +7,7 @@ from .interceptors.openai import install_openai_interceptor, uninstall_openai_in
 from .interceptors.anthropic import install_anthropic_interceptor, uninstall_anthropic_interceptor
 from .replay import is_replaying, consume_cassette_entry
 
-__version__ = "0.3.8"
+__version__ = "0.4.0"
 __all__ = [
     "configure", "get_config",
     "record", "TraceRecorder",
@@ -18,3 +18,4 @@ __all__ = [
     "install_anthropic_interceptor", "uninstall_anthropic_interceptor",
     "is_replaying", "consume_cassette_entry",
 ]
+# trigger

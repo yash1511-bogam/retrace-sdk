@@ -168,10 +168,19 @@ class HTTPTransport:
             cfg = get_config()
             url = f"{cfg.base_url}/api/v1/traces"
             headers = {"x-retrace-key": cfg.api_key, "Content-Type": "application/json"}
-            try:
-                requests.post(url, json=self._trace_data, headers=headers, timeout=10)
-            except Exception as e:
-                logger.debug(f"HTTP flush failed: {e}")
+            # Retry with exponential backoff (3 attempts)
+            for attempt in range(3):
+                try:
+                    resp = requests.post(url, json=self._trace_data, headers=headers, timeout=10)
+                    if resp.status_code < 500:
+                        break  # Success or client error (don't retry 4xx)
+                except Exception as e:
+                    if attempt == 2:
+                        logger.debug(f"HTTP flush failed after 3 attempts: {e}")
+                    else:
+                        time.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s backoff
+                        continue
+                break
             self._trace_data = None
             self._spans = []
 

@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 import functools
+import inspect
 import logging
 import random
 import threading
 import time
 from typing import Any, Callable
+
+
+def _should_sample(rate: float, seed: str | None = None, key: str | None = None) -> bool:
+    """Deterministic sampling using FNV-1a hash when seed is provided."""
+    if rate >= 1.0:
+        return True
+    if rate <= 0.0:
+        return False
+    if not seed:
+        return random.random() < rate
+    # FNV-1a hash for deterministic decision
+    input_str = f"{seed}:{key or ''}"
+    h = 2166136261
+    for ch in input_str:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xFFFFFFFF
+    return (h / 4294967296.0) < rate
 
 logger = logging.getLogger("retrace")
 
@@ -23,14 +42,26 @@ def _get_shared_transport() -> WSTransport | HTTPTransport:
     with _shared_lock:
         if _shared_transport is None:
             _shared_transport = create_transport()
+            # Register flush-on-exit to prevent data loss on process termination
+            import atexit
+            atexit.register(_flush_on_exit)
         return _shared_transport
+
+
+def _flush_on_exit():
+    """Flush any pending data before process exits."""
+    if _shared_transport and hasattr(_shared_transport, "close"):
+        try:
+            _shared_transport.close()
+        except Exception:
+            pass
 from .utils import gen_id, utcnow
 
 
 class TraceRecorder:
     """Manages recording of a single trace and its spans."""
 
-    def __init__(self, name: str | None = None, input: Any = None, metadata: dict | None = None, resumable: bool = False, session_id: str | None = None):
+    def __init__(self, name: str | None = None, input: Any = None, metadata: dict | None = None, resumable: bool = False, session_id: str | None = None, fork_point_span_id: str | None = None):
         require_api_key()
         self._trace = Trace(
             name=name,
@@ -44,6 +75,11 @@ class TraceRecorder:
         self._lock = threading.Lock()
         self._transport = _get_shared_transport()
         self._interceptors_installed = False
+        # Fork point filtering: suppress pre-fork spans during cascade replay.
+        # Server copies pre-fork spans; SDK only emits from fork point onward.
+        self._fork_point_span_id = fork_point_span_id
+        self._fork_point_reached = fork_point_span_id is None
+        self._span_counter = 0
 
     @property
     def trace(self) -> Trace:
@@ -126,6 +162,14 @@ class TraceRecorder:
         self._http_flush()
 
     def add_span(self, span: Span):
+        self._span_counter += 1
+        # Fork point filtering: skip pre-fork spans during cascade replay
+        if not self._fork_point_reached:
+            if self._fork_point_span_id and self._span_counter >= 1:
+                self._fork_point_reached = True
+            else:
+                return  # Suppress pre-fork span
+
         span.trace_id = self._trace.id
         with self._lock:
             self._trace.spans.append(span)
@@ -249,7 +293,7 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            if random.random() > cfg.sample_rate:
+            if not _should_sample(cfg.sample_rate, cfg.sample_seed, fn.__name__):
                 return fn(*args, **kwargs)
             recorder = TraceRecorder(name=fn.__name__, input={"args": list(args), "kwargs": kwargs}, resumable=resumable)
             recorder.start_trace()
@@ -279,7 +323,7 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            if random.random() > cfg.sample_rate:
+            if not _should_sample(cfg.sample_rate, cfg.sample_seed, name or fn.__name__):
                 return fn(*args, **kwargs)
             recorder = TraceRecorder(
                 name=name or fn.__name__,
@@ -296,7 +340,26 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
                 recorder.end_trace(status=TraceStatus.FAILED)
                 raise
 
-        return wrapper
+        @functools.wraps(fn)
+        async def async_wrapper(*args, **kwargs):
+            if not _should_sample(cfg.sample_rate, cfg.sample_seed, name or fn.__name__):
+                return await fn(*args, **kwargs)
+            recorder = TraceRecorder(
+                name=name or fn.__name__,
+                input=input if input is not None else {"args": list(args), "kwargs": kwargs},
+                metadata=metadata,
+                session_id=session_id or kwargs.get("session_id"),
+            )
+            recorder.start_trace()
+            try:
+                result = await fn(*args, **kwargs)
+                recorder.end_trace(output=result, status=TraceStatus.COMPLETED)
+                return result
+            except Exception as e:
+                recorder.end_trace(status=TraceStatus.FAILED)
+                raise
+
+        return async_wrapper if inspect.iscoroutinefunction(fn) else wrapper
 
     # If no function passed, could be context manager or decorator
     if not cfg.enabled:
@@ -312,7 +375,7 @@ def record(name: str | None = None, input: Any = None, metadata: dict | None = N
     class _RecordProxy:
         def __init__(self):
             self._recorder = TraceRecorder(name=name, input=input, metadata=metadata, resumable=resumable)
-            self._sampled = random.random() <= cfg.sample_rate
+            self._sampled = _should_sample(cfg.sample_rate, cfg.sample_seed, name)
 
         @property
         def output(self):

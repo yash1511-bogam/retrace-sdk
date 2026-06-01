@@ -28,44 +28,42 @@ export function getResumable(name: string): ((...args: unknown[]) => unknown) | 
   return resumableFunctions.get(name);
 }
 
-export function handleResume(command: ResumeCommand): boolean {
+export async function handleResume(command: ResumeCommand): Promise<boolean> {
   const fn = getResumable(command.traceName);
   if (!fn) return false;
 
-  // Re-execute async in background
-  (async () => {
-    try {
-      const { TraceRecorder } = await import("./recorder.js");
-      const { TraceStatus } = await import("./trace.js");
+  try {
+    const { TraceRecorder } = await import("./recorder.js");
+    const { TraceStatus } = await import("./trace.js");
 
-      const recorder = new TraceRecorder({
-        name: `Fork: ${command.traceName}`,
-        input: command.modifiedInput,
-        metadata: {
-          _fork_id: command.forkId,
-          _fork_of: command.traceId,
-          _fork_point: command.forkPointSpanId,
-          _cascade_replay: true,
-        },
-      });
-      recorder.start(`Fork: ${command.traceName}`, command.modifiedInput);
+    const recorder = new TraceRecorder({
+      name: `Fork: ${command.traceName}`,
+      input: command.modifiedInput,
+      metadata: {
+        _fork_id: command.forkId,
+        _fork_of: command.traceId,
+        _fork_point: command.forkPointSpanId,
+        _cascade_replay: true,
+      },
+      forkPointSpanId: command.forkPointSpanId,
+    });
+    recorder.start(`Fork: ${command.traceName}`, command.modifiedInput);
 
-      // Determine args for re-execution
-      let args: unknown[] = command.originalArgs || [];
-      if (typeof command.modifiedInput === "string") {
-        args = [command.modifiedInput, ...args.slice(1)];
-      } else if (typeof command.modifiedInput === "object" && !Array.isArray(command.modifiedInput)) {
-        args = [command.modifiedInput];
-      }
-
-      const result = await Promise.resolve(fn(...args));
-      recorder.end(result, TraceStatus.COMPLETED);
-    } catch (err) {
-      console.error("[retrace] Cascade replay failed:", err);
+    // Determine args for re-execution
+    let args: unknown[] = command.originalArgs || [];
+    if (typeof command.modifiedInput === "string") {
+      args = [command.modifiedInput, ...args.slice(1)];
+    } else if (typeof command.modifiedInput === "object" && !Array.isArray(command.modifiedInput)) {
+      args = [command.modifiedInput];
     }
-  })();
 
-  return true;
+    const result = await Promise.resolve(fn(...args));
+    recorder.end(result, TraceStatus.COMPLETED);
+    return true;
+  } catch (err) {
+    console.error("[retrace] Cascade replay failed:", err);
+    return false;
+  }
 }
 
 export function parseResumeMessage(msg: { type: string; data?: Record<string, unknown> }): ResumeCommand | null {
