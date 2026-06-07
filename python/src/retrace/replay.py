@@ -18,19 +18,22 @@ Usage in tool implementations:
 """
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
-from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from dataclasses import dataclass
+from typing import Any, Optional
 
 from .resume import get_resumable
 
 logger = logging.getLogger("retrace")
 
-# Thread-local cassette state
-_cassette_lock = threading.Lock()
-_active_cassette: list[dict] | None = None
-_cassette_pointer: int = 0
+# Replay cassette state is held in CONTEXT VARIABLES — not module globals — so an active
+# replay (run on its own thread/task by handle_replay) is isolated to that execution context
+# and can NEVER cause a concurrent live LLM call on another thread/task to return recorded
+# output. A module global here would hijack the user's real production calls.
+_cassette_var: contextvars.ContextVar[Optional[list]] = contextvars.ContextVar("retrace_replay_cassette", default=None)
+_pointer_var: contextvars.ContextVar[int] = contextvars.ContextVar("retrace_replay_pointer", default=0)
 
 
 @dataclass
@@ -43,33 +46,46 @@ class ReplayCommand:
 
 
 def is_replaying() -> bool:
-    """Check if a deterministic replay is currently active."""
-    return _active_cassette is not None
+    """Check if a deterministic replay is active in the CURRENT execution context."""
+    return _cassette_var.get() is not None
+
+
+def activate_cassette(cassette: list) -> None:
+    """Activate a cassette for the current execution context (the replay thread/task only)."""
+    _cassette_var.set(cassette)
+    _pointer_var.set(0)
+
+
+def deactivate_cassette() -> None:
+    """Clear the cassette for the current execution context."""
+    _cassette_var.set(None)
+    _pointer_var.set(0)
 
 
 def consume_cassette_entry(name: str, span_type: str) -> Optional[dict]:
     """Get the next cassette entry matching a span name and type.
 
     Uses sequential matching with name-based fallback for deterministic replay.
+    Reads only the CURRENT context's cassette, so concurrent live calls are unaffected.
     Returns the full entry dict with 'output', 'error', etc. or None if not replaying.
     """
-    global _cassette_pointer
-    if _active_cassette is None:
+    cassette = _cassette_var.get()
+    if cassette is None:
         return None
 
-    with _cassette_lock:
-        # Primary: sequential pointer (deterministic order)
-        if _cassette_pointer < len(_active_cassette):
-            entry = _active_cassette[_cassette_pointer]
-            if entry.get("name") == name and entry.get("span_type") == span_type:
-                _cassette_pointer += 1
-                return entry
+    ptr = _pointer_var.get()
+    # Primary: sequential pointer (deterministic order)
+    if ptr < len(cassette):
+        entry = cassette[ptr]
+        if entry.get("name") == name and entry.get("span_type") == span_type:
+            _pointer_var.set(ptr + 1)
+            return entry
 
-        # Fallback: search by name + type from current pointer forward
-        for i in range(_cassette_pointer, len(_active_cassette)):
-            if _active_cassette[i].get("name") == name and _active_cassette[i].get("span_type") == span_type:
-                _cassette_pointer = i + 1
-                return _active_cassette[i]
+    # Fallback: search by name + type from current pointer forward
+    for i in range(ptr, len(cassette)):
+        if cassette[i].get("name") == name and cassette[i].get("span_type") == span_type:
+            _pointer_var.set(i + 1)
+            return cassette[i]
 
     return None
 
@@ -85,14 +101,12 @@ def handle_replay(command: ReplayCommand) -> bool:
         return False
 
     def _run():
-        global _active_cassette, _cassette_pointer
         try:
             from .recorder import TraceRecorder
             from .trace import TraceStatus
 
-            # Set up cassette
-            _active_cassette = command.cassette
-            _cassette_pointer = 0
+            # Activate the cassette for THIS thread's context only — never globally.
+            activate_cassette(command.cassette)
 
             recorder = TraceRecorder(
                 name=f"Replay: {command.trace_name}",
@@ -119,8 +133,7 @@ def handle_replay(command: ReplayCommand) -> bool:
         except Exception as e:
             logger.error(f"[retrace] Deterministic replay failed: {e}")
         finally:
-            _active_cassette = None
-            _cassette_pointer = 0
+            deactivate_cassette()
 
     thread = threading.Thread(target=_run, daemon=True, name=f"retrace-replay-{command.trace_id}")
     thread.start()

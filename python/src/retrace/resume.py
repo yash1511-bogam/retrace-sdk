@@ -10,11 +10,10 @@ This enables "Git branching for AI agent execution."
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
-from dataclasses import dataclass, field
 
 logger = logging.getLogger("retrace")
 
@@ -43,6 +42,7 @@ class ResumeCommand:
     trace_name: str
     fork_point_span_id: str
     modified_input: Any
+    fork_point_index: Optional[int] = None
     original_args: Any = None
     original_kwargs: Any = None
     cassette_data: list | None = None  # Pre-recorded spans for deterministic replay
@@ -50,7 +50,7 @@ class ResumeCommand:
 
 def handle_resume(command: ResumeCommand) -> bool:
     """Handle a resume command — re-execute the agent function.
-    
+
     Returns True if the function was found and re-execution started.
     """
     fn = get_resumable(command.trace_name)
@@ -62,9 +62,9 @@ def handle_resume(command: ResumeCommand) -> bool:
     def _run():
         try:
             from .recorder import TraceRecorder
+            from .replay import activate_cassette, deactivate_cassette
             from .trace import TraceStatus
             from .transport import HTTPTransport
-            from .cassette import Cassette, set_active_cassette
 
             # Use HTTP transport for fork replays — ensures trace_ended is delivered
             # before the thread exits (WS is async and may not flush in time)
@@ -78,16 +78,20 @@ def handle_resume(command: ResumeCommand) -> bool:
                     "_cascade_replay": True,
                 },
                 fork_point_span_id=command.fork_point_span_id,
+                fork_point_index=command.fork_point_index,
             )
             recorder._transport = HTTPTransport()
             recorder.start_trace()
             recorder._install_interceptors()
 
-            # Enable deterministic replay if cassette data is provided
+            # Enable deterministic replay if cassette data is provided. This routes through the
+            # SAME context-isolated mechanism the interceptors read (replay.py), so recorded
+            # outputs are actually returned during cascade replay. Previously it set a separate
+            # cassette store (cassette.py) the interceptors never consulted — i.e. dead wiring,
+            # so cascade replay silently made real (billed) LLM calls instead of replaying.
             if command.cassette_data:
-                cassette = Cassette.from_spans(command.cassette_data)
-                set_active_cassette(cassette)
-                logger.info(f"[retrace] Deterministic replay enabled ({len(cassette.entries)} entries)")
+                activate_cassette(command.cassette_data)
+                logger.info(f"[retrace] Deterministic replay enabled ({len(command.cassette_data)} entries)")
 
             # Re-execute with modified input
             args = command.original_args or []
@@ -101,14 +105,14 @@ def handle_resume(command: ResumeCommand) -> bool:
 
             result = fn(*args, **kwargs)
             recorder.end_trace(output=result, status=TraceStatus.COMPLETED)
-            set_active_cassette(None)  # Clear cassette after replay
+            deactivate_cassette()  # Clear cassette after replay
             logger.info(f"[retrace] Cascade replay completed for fork {command.fork_id}")
         except Exception as e:
             logger.error(f"[retrace] Cascade replay failed: {e}")
-            set_active_cassette(None)
+            deactivate_cassette()
             try:
                 recorder.end_trace(status=TraceStatus.FAILED)
-            except:
+            except Exception:
                 pass
 
     thread = threading.Thread(target=_run, daemon=True, name=f"retrace-replay-{command.fork_id}")
@@ -126,6 +130,7 @@ def parse_resume_message(msg: dict) -> Optional[ResumeCommand]:
         trace_id=data.get("traceId", ""),
         trace_name=data.get("traceName", ""),
         fork_point_span_id=data.get("forkPointSpanId", ""),
+        fork_point_index=data.get("forkPointIndex"),
         modified_input=data.get("modifiedInput"),
         original_args=data.get("originalArgs"),
         original_kwargs=data.get("originalKwargs"),

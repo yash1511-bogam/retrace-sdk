@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
 from enum import Enum
+from typing import Any, Optional
 
 from .utils import gen_id, utcnow
 

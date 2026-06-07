@@ -1,8 +1,10 @@
 import { SpanData, SpanType } from "../trace.js";
-import { genId, nowIso, truncateJson } from "../utils.js";
+import { genId, nowIso, truncateJson, wasTruncated } from "../utils.js";
 import { isReplaying, consumeCassetteEntry } from "../replay.js";
 import { getConfig } from "../config.js";
 import { RetraceRateLimitError, RetraceAuthError, RetraceConnectionError } from "../errors.js";
+import { emitOpenAIToolCalls, emitOpenAIToolResults, parseToolArgs, resetToolResultDedup, extractToolSchemas, extractSamplingParams } from "./tool-spans.js";
+import { dispatchRegisterOpenSpan, dispatchUnregisterOpenSpan } from "./_dispatch.js";
 
 /** Hardcoded fallback pricing ($/1M tokens: [input, output]). Updated periodically. */
 const FALLBACK_PRICING: Record<string, [number, number]> = {
@@ -62,11 +64,19 @@ function calcCost(model: string, inputTokens: number, outputTokens: number): num
 
 let originalCreate: ((...args: unknown[]) => unknown) | null = null;
 let installed = false;
+// Set SYNCHRONOUSLY before the async import() so a second concurrent install can't double-wrap the
+// prototype. (`installed` is set inside the .then() and is therefore too late to guard the race.)
+let installStarted = false;
 let onSpanCallback: ((span: SpanData) => void) | null = null;
 
 export function installOpenAIInterceptor(onSpan: (span: SpanData) => void) {
-  if (installed) { onSpanCallback = onSpan; return; }
+  // Always refresh the active callback; the prototype PATCH must happen at most once. The guard is
+  // a synchronous flag set before import() so two concurrent installs (e.g. two recorders starting
+  // before "openai" resolves) can't both patch and double-wrap create() → doubled spans/billing.
   onSpanCallback = onSpan;
+  resetToolResultDedup();
+  if (installStarted) return;
+  installStarted = true;
 
   import("openai").then((openaiMod) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,7 +98,7 @@ export function installOpenAIInterceptor(onSpan: (span: SpanData) => void) {
     originalCreate = proto.create;
     proto.create = createPatchedCreate();
     installed = true;
-  }).catch(() => {});
+  }).catch(() => { installStarted = false; });
 }
 
 function createPatchedCreate() {
@@ -110,12 +120,17 @@ function createPatchedCreate() {
     const spanMetadata: Record<string, unknown> = {};
     if (hasVision) spanMetadata.vision = true;
     if (responseFormat) spanMetadata.structured_output = typeof responseFormat === "object" ? responseFormat.type || "json_schema" : responseFormat;
+    // Capture declared tool parameter schemas so the detection engine can validate tool args.
+    const toolSchemas = extractToolSchemas("openai", opts.tools);
+    if (toolSchemas) spanMetadata.tool_schemas = toolSchemas;
+    const sampling = extractSamplingParams("openai", opts);
+    if (sampling) spanMetadata.sampling = sampling;
 
     // During replay, return mocked response from cassette instead of calling the real API
     if (isReplaying()) {
       const entry = consumeCassetteEntry("openai.chat.completions.create", "llm_call");
       if (entry) {
-        const output = typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output || "");
+        const output = entry.output_raw ?? (typeof entry.output === "string" ? entry.output : JSON.stringify(entry.output || ""));
         const span: SpanData = {
           id: spanId, trace_id: "", parent_id: null,
           span_type: SpanType.LLM_CALL, name: "openai.chat.completions.create", model,
@@ -144,8 +159,40 @@ function createPatchedCreate() {
         const chunks: string[] = [];
         let inputTokens = 0;
         let outputTokens = 0;
+        // Accumulate streamed tool calls by index (id/name arrive first, arguments stream in).
+        const toolAcc: Record<number, { id?: string; name?: string; args: string }> = {};
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const originalIterator = (result as any)[Symbol.asyncIterator]();
+
+        // Two-phase capture: register an OPEN span now and finalize EXACTLY ONCE — on clean drain
+        // (complete), on early break / error (partial), or at trace-end/exit (partial, via the sink).
+        // Previously the span was emitted only in the `done` branch, so an abandoned or errored
+        // stream silently lost its span entirely.
+        let finalized = false;
+        const finalize = (reason: "complete" | "partial") => {
+          if (finalized) return;
+          finalized = true;
+          dispatchUnregisterOpenSpan(spanId);
+          const durationMs = Date.now() - startMs;
+          const output = chunks.join("");
+          const span: SpanData = {
+            id: spanId, trace_id: "", parent_id: null,
+            span_type: SpanType.LLM_CALL, name: "openai.chat.completions.create", model,
+            input: truncateJson({ messages: messages.slice(0, 10) }),
+            output: truncateJson(output),
+            input_tokens: inputTokens, output_tokens: outputTokens,
+            cost: calcCost(model, inputTokens, outputTokens),
+            duration_ms: durationMs, started_at: startedAt, ended_at: nowIso(),
+            metadata: { streaming: true, ...(reason === "partial" ? { partial: true } : {}), ...(wasTruncated(output) ? { truncated: true } : {}), ...(toolSchemas ? { tool_schemas: toolSchemas } : {}), ...(sampling ? { sampling } : {}) },
+          };
+          onSpanCallback?.(span);
+          if (onSpanCallback && reason === "complete") {
+            emitOpenAIToolResults(messages, onSpanCallback);
+            const accMsg = { tool_calls: Object.values(toolAcc).map((t) => ({ id: t.id, function: { name: t.name, arguments: parseToolArgs(t.args) } })) };
+            emitOpenAIToolCalls(accMsg, spanId, model, onSpanCallback);
+          }
+        };
+        dispatchRegisterOpenSpan(spanId, () => finalize("partial"));
 
         const wrappedStream = {
           [Symbol.asyncIterator]() {
@@ -153,25 +200,23 @@ function createPatchedCreate() {
               async next() {
                 const { value, done } = await originalIterator.next();
                 if (done) {
-                  // Stream complete — emit span
-                  const durationMs = Date.now() - startMs;
-                  const output = chunks.join("");
-                  const span: SpanData = {
-                    id: spanId, trace_id: "", parent_id: null,
-                    span_type: SpanType.LLM_CALL, name: "openai.chat.completions.create", model,
-                    input: truncateJson({ messages: messages.slice(0, 10) }),
-                    output: truncateJson(output),
-                    input_tokens: inputTokens, output_tokens: outputTokens,
-                    cost: calcCost(model, inputTokens, outputTokens),
-                    duration_ms: durationMs, started_at: startedAt, ended_at: nowIso(),
-                    metadata: { streaming: true },
-                  };
-                  onSpanCallback?.(span);
+                  finalize("complete");
                   return { value: undefined, done: true };
                 }
                 // Collect content delta
                 const delta = value?.choices?.[0]?.delta?.content;
                 if (delta) chunks.push(delta);
+                // Collect streamed tool-call deltas (function name/id, then argument fragments)
+                const tcDeltas = value?.choices?.[0]?.delta?.tool_calls;
+                if (Array.isArray(tcDeltas)) {
+                  for (const tc of tcDeltas) {
+                    const idx = typeof tc.index === "number" ? tc.index : 0;
+                    const acc = (toolAcc[idx] ??= { args: "" });
+                    if (tc.id) acc.id = tc.id;
+                    if (tc.function?.name) acc.name = tc.function.name;
+                    if (typeof tc.function?.arguments === "string") acc.args += tc.function.arguments;
+                  }
+                }
                 // Collect usage from final chunk
                 if (value?.usage) {
                   inputTokens = value.usage.prompt_tokens || 0;
@@ -179,8 +224,10 @@ function createPatchedCreate() {
                 }
                 return { value, done: false };
               },
-              return() { return originalIterator.return?.() ?? Promise.resolve({ value: undefined, done: true }); },
-              throw(e: unknown) { return originalIterator.throw?.(e) ?? Promise.reject(e); },
+              // Early break (consumer stops iterating) and errors must still finalize the span —
+              // otherwise the streamed work is silently lost.
+              return() { finalize("partial"); return originalIterator.return?.() ?? Promise.resolve({ value: undefined, done: true }); },
+              throw(e: unknown) { finalize("partial"); return originalIterator.throw?.(e) ?? Promise.reject(e); },
             };
           },
           // Preserve tee/controller methods if present
@@ -214,9 +261,15 @@ function createPatchedCreate() {
         duration_ms: durationMs, started_at: startedAt, ended_at: nowIso(),
         ...(tokenIds?.length ? { token_ids: tokenIds } : {}),
         ...(logprobValues?.length ? { logprobs: logprobValues } : {}),
-        ...(Object.keys(spanMetadata).length ? { metadata: spanMetadata } : {}),
+        ...(Object.keys(spanMetadata).length || wasTruncated(output) ? { metadata: { ...spanMetadata, ...(wasTruncated(output) ? { truncated: true } : {}) } } : {}),
       };
       onSpanCallback?.(span);
+      // Auto-capture tool usage: tool_result spans from the fed-back tool messages (deduped),
+      // tool_call spans from the model's requested calls (structured args).
+      if (onSpanCallback) {
+        emitOpenAIToolResults(messages, onSpanCallback);
+        emitOpenAIToolCalls(res?.choices?.[0]?.message, spanId, model, onSpanCallback);
+      }
       return result;
     } catch (err) {
       const span: SpanData = {

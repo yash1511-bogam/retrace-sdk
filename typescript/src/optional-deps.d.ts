@@ -11,3 +11,10 @@ declare module "@anthropic-ai/sdk" {
   export default mod;
   export const Anthropic: unknown;
 }
+
+declare module "@langchain/core/callbacks/base" {
+  export class BaseCallbackHandler {
+    name: string;
+    constructor(...args: unknown[]);
+  }
+}

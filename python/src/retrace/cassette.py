@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
@@ -53,7 +54,7 @@ class Cassette:
 
     def consume(self, model: str | None, input_data: Any) -> Optional[CassetteEntry]:
         """Consume the next matching cassette entry.
-        
+
         Matching strategy (ordered by priority):
         1. Content-addressed: match by (model, input_hash)
         2. Sequential fallback: return next unconsumed entry of same span_type
@@ -104,7 +105,6 @@ class Cassette:
 
 
 # ─── Replay Context (thread-local) ───────────────────────────────────
-import threading
 
 _replay_context: threading.local = threading.local()
 

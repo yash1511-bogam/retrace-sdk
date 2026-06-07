@@ -5,31 +5,42 @@ Format: 00-{trace_id_32hex}-{parent_id_16hex}-{flags_2hex}
 When a traced function makes HTTP calls, inject the traceparent header
 so downstream services can correlate their spans with the parent trace.
 """
-from typing import Optional, Dict, Tuple
+from typing import Dict, Optional, Tuple
+import contextvars
 
-_current_trace_id: Optional[str] = None
-_current_span_id: Optional[str] = None
-
-
-def set_trace_context(trace_id: str, span_id: str) -> None:
-    """Set the active trace context for outgoing requests."""
-    global _current_trace_id, _current_span_id
-    _current_trace_id = trace_id.replace("-", "")
-    _current_span_id = span_id.replace("-", "")[:16]
+# Per-context trace context (mirrors the _dispatch ContextVar). Each thread / async task resolves
+# its own value, so concurrent traces can't leak context into one another's outbound requests.
+_trace_ctx: contextvars.ContextVar[Optional[Tuple[str, str]]] = contextvars.ContextVar(
+    "retrace_trace_ctx", default=None
+)
 
 
-def clear_trace_context() -> None:
-    """Clear the active trace context."""
-    global _current_trace_id, _current_span_id
-    _current_trace_id = None
-    _current_span_id = None
+def set_trace_context(trace_id: str, span_id: str):
+    """Set the active trace context for outgoing requests. Returns a token for reset()."""
+    return _trace_ctx.set((trace_id.replace("-", ""), span_id.replace("-", "")[:16]))
+
+
+def clear_trace_context(token=None) -> None:
+    """Clear the active trace context. Pass the token from set_trace_context to restore the
+    enclosing context (supports nesting); otherwise the context is cleared outright."""
+    if token is not None:
+        try:
+            _trace_ctx.reset(token)
+            return
+        except (ValueError, LookupError):
+            pass
+    _trace_ctx.set(None)
 
 
 def get_traceparent() -> Optional[str]:
     """Get the current traceparent header value, or None if no active trace."""
-    if not _current_trace_id or not _current_span_id:
+    ctx = _trace_ctx.get()
+    if not ctx:
         return None
-    return f"00-{_current_trace_id}-{_current_span_id}-01"
+    trace_id, span_id = ctx
+    if not trace_id or not span_id:
+        return None
+    return f"00-{trace_id}-{span_id}-01"
 
 
 def inject_traceparent(headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:

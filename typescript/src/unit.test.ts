@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { configure, getConfig, requireApiKey } from "./config.js";
 import { TraceRecorder } from "./recorder.js";
-import { SpanType, TraceStatus } from "./trace.js";
+import { SpanType, TraceStatus, TraceBuilder } from "./trace.js";
 
 beforeEach(() => {
   // Reset config
@@ -155,5 +155,19 @@ describe("Recorder Lifecycle", () => {
     rec.end("done");
     const data = rec.builder.toDict();
     expect(data.spans!.length).toBe(2);
+  });
+
+  it("bounds retained spans so a long-lived ambient trace can't leak memory", () => {
+    const b = new TraceBuilder();
+    b.start("ambient");
+    for (let i = 0; i < 1500; i++) {
+      b.addSpan({ id: `s${i}`, span_type: SpanType.LLM_CALL, name: "x", input_tokens: 1, output_tokens: 1, cost: 0.001 } as never);
+    }
+    const data = b.toDict();
+    // Retained copy is capped...
+    expect(data.spans!.length).toBe(1000);
+    // ...but aggregates still reflect ALL spans (not just the retained ones).
+    expect(data.total_tokens).toBe(3000);
+    expect(Math.round(data.total_cost * 1000) / 1000).toBe(1.5);
   });
 });

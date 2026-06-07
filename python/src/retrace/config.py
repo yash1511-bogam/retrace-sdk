@@ -1,6 +1,7 @@
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger("retrace")
 
@@ -16,6 +17,14 @@ class RetraceConfig:
     sample_rate: float = 1.0
     sample_seed: str | None = None
     max_payload_size: int = 2000
+    # Transport mode: "auto" (default, WebSocket with offline buffer), or "http"
+    # (request/response only — recommended for short scripts/serverless: no open socket,
+    # full trace+spans POST, and upload errors are always logged).
+    transport: str = "auto"
+    # Server-signal callback — receives a STRUCTURED retrace.errors.RetraceServerSignal
+    # (code/retryable/fatal), mirroring the TS `onError`. None ⇒ transport throttled-warns by
+    # default (never silent). Set in configure() before the first trace.
+    on_error: Optional[Callable[[Any], None]] = None
 
     def __post_init__(self):
         if not self.api_key:
@@ -35,6 +44,9 @@ class RetraceConfig:
         seed_env = os.environ.get("RETRACE_SAMPLE_SEED")
         if seed_env:
             self.sample_seed = seed_env
+        transport_env = os.environ.get("RETRACE_TRANSPORT")
+        if transport_env in ("auto", "ws", "http"):
+            self.transport = transport_env
 
 
 _config: RetraceConfig | None = None
@@ -65,5 +77,8 @@ def require_api_key() -> str:
     """Ensure a valid API key is configured. Raises if not."""
     cfg = get_config()
     if not cfg.api_key:
-        raise RuntimeError("Retrace API key required. Call retrace.configure(api_key='rt_live_...') or set RETRACE_API_KEY. Get yours at https://retrace.yashbogam.me/settings")
+        raise RuntimeError(
+            "Retrace API key required. Call retrace.configure(api_key='rt_live_...') "
+            "or set RETRACE_API_KEY. Get yours at https://retrace.yashbogam.me/settings"
+        )
     return cfg.api_key

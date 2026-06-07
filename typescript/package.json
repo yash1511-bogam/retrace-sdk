@@ -1,6 +1,6 @@
 {
   "name": "retrace-sdk",
-  "version": "0.6.0",
+  "version": "0.11.5",
   "description": "The execution replay engine for AI agents. Record, replay, fork, and share agent executions.",
   "type": "module",
   "main": "dist/index.js",
@@ -9,6 +9,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./adapters/langchain": {
+      "types": "./dist/adapters/langchain.d.ts",
+      "import": "./dist/adapters/langchain.js"
+    },
+    "./adapters/vercel-ai": {
+      "types": "./dist/adapters/vercel-ai.d.ts",
+      "import": "./dist/adapters/vercel-ai.js"
     }
   },
   "files": ["dist", "README.md", "LICENSE"],
@@ -32,12 +40,13 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "ws": "8.20.0"
+    "ws": "^8.20.1"
   },
   "peerDependencies": {
     "@google/genai": ">=1.52.0",
     "openai": ">=4.0.0",
-    "@anthropic-ai/sdk": ">=0.30.0"
+    "@anthropic-ai/sdk": ">=0.30.0",
+    "@langchain/core": ">=0.3.0"
   },
   "peerDependenciesMeta": {
     "@google/genai": {
@@ -47,6 +56,9 @@
       "optional": true
     },
     "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@langchain/core": {
       "optional": true
     }
   },

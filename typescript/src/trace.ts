@@ -128,7 +128,11 @@ export class TraceBuilder {
   }
 
   addSpan(span: SpanData) {
-    this.data.spans!.push(span);
+    // Spans are streamed individually through the transport (and HTTPTransport keeps its own
+    // per-trace buffer for the batched POST), so this retained array is only an in-memory
+    // convenience and is never itself transmitted. Cap it so init()'s long-lived ambient
+    // trace can't accumulate spans for the life of the process (an unbounded memory leak).
+    if (this.data.spans!.length < 1000) this.data.spans!.push(span);
     this.data.total_tokens += (span.input_tokens || 0) + (span.output_tokens || 0);
     this.data.total_cost += span.cost || 0;
   }

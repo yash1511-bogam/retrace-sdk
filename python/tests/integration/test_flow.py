@@ -20,7 +20,7 @@ def setup():
     cfg._config = None
 
 
-def _make_http_transport():
+def _make_http_transport(*args, **kwargs):
     return HTTPTransport()
 
 

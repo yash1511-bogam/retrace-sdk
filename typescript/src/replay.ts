@@ -20,6 +20,9 @@ export interface CassetteEntry {
   model: string | null;
   input: unknown;
   output: unknown;
+  /** Exact original token for byte-identical replay (e.g. scalar-numeric outputs whose JSON.parse
+   *  form lost precision). Preferred over `output` when present. */
+  output_raw?: string;
   error: string | null;
 }
 

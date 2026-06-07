@@ -41,6 +41,16 @@ export function truncateJson(obj: unknown, maxBytes = 10240): unknown {
   }
 }
 
+/** True if truncateJson(obj, maxBytes) would drop bytes. Used to flag a span's output as truncated
+ *  so the server refuses to byte-replay it (the replayed value would differ from the original). */
+export function wasTruncated(obj: unknown, maxBytes = 10240): boolean {
+  try {
+    return Buffer.byteLength(JSON.stringify(obj)) > maxBytes;
+  } catch {
+    return String(obj).length > maxBytes;
+  }
+}
+
 /** Default per-span-type truncation limits (bytes). */
 const DEFAULT_TRUNCATION_LIMITS: Record<string, number> = {
   llm_call: 51200,    // 50KB — LLM prompts can be large

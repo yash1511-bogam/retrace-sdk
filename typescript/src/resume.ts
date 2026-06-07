@@ -13,6 +13,9 @@ export interface ResumeCommand {
   traceId: string;
   traceName: string;
   forkPointSpanId: string;
+  /** 0-based ordinal of the fork-point span among the original ordered spans. Pre-fork spans
+   *  (counter <= index) are suppressed on re-exec; the server already has them. */
+  forkPointIndex?: number;
   modifiedInput: unknown;
   originalArgs?: unknown[];
 }
@@ -46,6 +49,7 @@ export async function handleResume(command: ResumeCommand): Promise<boolean> {
         _cascade_replay: true,
       },
       forkPointSpanId: command.forkPointSpanId,
+      forkPointIndex: command.forkPointIndex,
     });
     recorder.start(`Fork: ${command.traceName}`, command.modifiedInput);
 
@@ -73,6 +77,7 @@ export function parseResumeMessage(msg: { type: string; data?: Record<string, un
     traceId: msg.data.traceId as string,
     traceName: msg.data.traceName as string,
     forkPointSpanId: msg.data.forkPointSpanId as string,
+    forkPointIndex: msg.data.forkPointIndex as number | undefined,
     modifiedInput: msg.data.modifiedInput,
     originalArgs: msg.data.originalArgs as unknown[],
   };
