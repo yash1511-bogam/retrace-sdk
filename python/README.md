@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/yash1511-bogam/retrace-sdk/main/assets/banner.png" alt="Retrace" width="480" />
+<img src="https://raw.githubusercontent.com/yash1511-bogam/retrace-sdk/main/assets/banner.gif" alt="Retrace" width="480" />
 
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
 

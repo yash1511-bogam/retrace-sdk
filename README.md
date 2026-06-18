@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/banner.png" alt="Retrace" width="480" />
+<img src="assets/banner.gif" alt="Retrace" width="480" />
 
 ![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
