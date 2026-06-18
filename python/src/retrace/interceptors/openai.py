@@ -11,6 +11,7 @@ from .tool_spans import (
     reset_tool_result_dedup,
 )
 from ._dispatch import capture_active_emit, register_open_span, unregister_open_span
+from ..pricing import UNKNOWN_MODEL_PRICING, cost_from_rate
 
 _original_create = None
 _original_async_create = None
@@ -47,8 +48,9 @@ PRICING = {
 def _calc_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     for key, p in PRICING.items():
         if key in model:
-            return (input_tokens * p[0] + output_tokens * p[1]) / 1_000_000
-    return 0.0
+            return cost_from_rate(p, input_tokens, output_tokens)
+    # Unknown model — never cost $0 (that silently disarms USD budget ceilings). Conservative fallback.
+    return cost_from_rate(UNKNOWN_MODEL_PRICING, input_tokens, output_tokens)
 
 
 def _wrap_stream(stream, span_id, model, messages, start, tool_schemas=None, sampling=None):

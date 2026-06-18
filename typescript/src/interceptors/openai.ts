@@ -5,6 +5,7 @@ import { getConfig } from "../config.js";
 import { RetraceRateLimitError, RetraceAuthError, RetraceConnectionError } from "../errors.js";
 import { emitOpenAIToolCalls, emitOpenAIToolResults, parseToolArgs, resetToolResultDedup, extractToolSchemas, extractSamplingParams } from "./tool-spans.js";
 import { dispatchRegisterOpenSpan, dispatchUnregisterOpenSpan } from "./_dispatch.js";
+import { UNKNOWN_MODEL_PRICING, costFromRate } from "../pricing.js";
 
 /** Hardcoded fallback pricing ($/1M tokens: [input, output]). Updated periodically. */
 const FALLBACK_PRICING: Record<string, [number, number]> = {
@@ -57,9 +58,10 @@ fetchPricing().catch(() => {});
 function calcCost(model: string, inputTokens: number, outputTokens: number): number {
   const pricing = livePricing || FALLBACK_PRICING;
   for (const [key, p] of Object.entries(pricing)) {
-    if (model.includes(key)) return (inputTokens * p[0] + outputTokens * p[1]) / 1_000_000;
+    if (model.includes(key)) return costFromRate(p, inputTokens, outputTokens);
   }
-  return 0;
+  // Unknown model — never cost $0 (that silently disarms USD budget ceilings). Conservative fallback.
+  return costFromRate(UNKNOWN_MODEL_PRICING, inputTokens, outputTokens);
 }
 
 let originalCreate: ((...args: unknown[]) => unknown) | null = null;

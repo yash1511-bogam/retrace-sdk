@@ -16,7 +16,7 @@ from .replay import consume_cassette_entry, is_replaying
 from .stream import stream
 from .trace import Span, SpanType, Trace, TraceStatus
 
-__version__ = "0.11.5"
+__version__ = "0.16.0"
 __all__ = [
     "configure", "get_config",
     "init", "get_active_recorder", "shutdown",

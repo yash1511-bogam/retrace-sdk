@@ -3,6 +3,7 @@ import time
 import uuid
 
 from ._dispatch import capture_active_emit, register_open_span, unregister_open_span
+from ..pricing import UNKNOWN_MODEL_PRICING, cost_from_rate
 from .tool_spans import (
     emit_gemini_tool_calls,
     emit_gemini_tool_results,
@@ -35,8 +36,9 @@ PRICING = {
 
 
 def _calc_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    p = PRICING.get(model, (0, 0))
-    return (input_tokens * p[0] + output_tokens * p[1]) / 1_000_000
+    # Unknown model falls back to a conservative non-zero rate so USD budget ceilings still engage.
+    p = PRICING.get(model, UNKNOWN_MODEL_PRICING)
+    return cost_from_rate(p, input_tokens, output_tokens)
 
 
 def _extract_output_text(result) -> str:

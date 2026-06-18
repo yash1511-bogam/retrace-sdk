@@ -2,6 +2,7 @@ import { SpanData, SpanType } from "../trace.js";
 import { genId, nowIso, truncateJson } from "../utils.js";
 import { dispatchRegisterOpenSpan, dispatchUnregisterOpenSpan, captureActiveSpanEmit } from "./_dispatch.js";
 import { emitGeminiToolCalls, emitGeminiToolResults, resetToolResultDedup, extractToolSchemas, extractSamplingParams } from "./tool-spans.js";
+import { UNKNOWN_MODEL_PRICING, costFromRate } from "../pricing.js";
 
 const PRICING: Record<string, [number, number]> = {
   "gemini-3.1-flash-lite": [0.10, 0.40],
@@ -17,8 +18,10 @@ const PRICING: Record<string, [number, number]> = {
 };
 
 function calcCost(model: string, inputTokens: number, outputTokens: number): number {
-  const p = PRICING[model] || [0, 0];
-  return (inputTokens * p[0] + outputTokens * p[1]) / 1_000_000;
+  // Exact-match table (substring matching would mis-rank "…-flash" vs "…-flash-lite"); an unknown
+  // model falls back to a conservative non-zero rate so USD budget ceilings still engage.
+  const p = PRICING[model] ?? UNKNOWN_MODEL_PRICING;
+  return costFromRate(p, inputTokens, outputTokens);
 }
 
 let onSpanCallback: ((span: SpanData) => void) | null = null;

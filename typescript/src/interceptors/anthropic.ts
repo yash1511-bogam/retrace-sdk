@@ -3,6 +3,7 @@ import { genId, nowIso, truncateJson, wasTruncated } from "../utils.js";
 import { isReplaying, consumeCassetteEntry } from "../replay.js";
 import { emitAnthropicToolCalls, emitAnthropicToolResults, parseToolArgs, resetToolResultDedup, extractToolSchemas, extractSamplingParams } from "./tool-spans.js";
 import { dispatchRegisterOpenSpan, dispatchUnregisterOpenSpan } from "./_dispatch.js";
+import { UNKNOWN_MODEL_PRICING, costFromRate } from "../pricing.js";
 
 const PRICING: Record<string, [number, number]> = {
   "claude-opus-4.7": [5.0, 25.0],
@@ -18,9 +19,10 @@ const PRICING: Record<string, [number, number]> = {
 
 function calcCost(model: string, inputTokens: number, outputTokens: number): number {
   for (const [key, p] of Object.entries(PRICING)) {
-    if (model.includes(key)) return (inputTokens * p[0] + outputTokens * p[1]) / 1_000_000;
+    if (model.includes(key)) return costFromRate(p, inputTokens, outputTokens);
   }
-  return 0;
+  // Unknown model — never cost $0 (that silently disarms USD budget ceilings). Conservative fallback.
+  return costFromRate(UNKNOWN_MODEL_PRICING, inputTokens, outputTokens);
 }
 
 let originalCreate: ((...args: unknown[]) => unknown) | null = null;
